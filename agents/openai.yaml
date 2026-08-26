@@ -1,4 +1,0 @@
-interface:
-  display_name: "Evidence-Weighted Purchase Ranking"
-  short_description: "Rank comparable marketplace purchases by seller evidence"
-  default_prompt: "Use $evidence-weighted-purchase-ranking to compare these marketplace listings and recommend the strongest purchase."
