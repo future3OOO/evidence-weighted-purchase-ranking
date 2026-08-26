@@ -1,101 +1,270 @@
 ---
 name: evidence-weighted-purchase-ranking
-description: Evidence-weighted ranking for marketplace purchases. Use when choosing among comparable listings and seller rating plus review/feedback or sales volume are available, or when another skill needs a seller-reputation score to support a purchase recommendation.
+description: Deterministic evidence-weighted ranking for comparable marketplace listings. Use when the user asks for the best value, best buy, or ranked choice among products and price/quantity, product rating/reviews/listing sales, or seller rating/feedback/transactions are available.
 ---
 
 # Evidence-Weighted Purchase Ranking
 
-Rank **comparable** marketplace listings without confusing seller reputation with item quality. The seller score answers _how much confidence should I place in buying from this seller?_ It does not answer whether the item itself is the right model, condition, specification, or price.
+Produce a **computed purchase ranking**, not a qualitative recommendation. Keep three populations separate:
 
-## 1. Establish the comparison set
+- **listing evidence**: product rating, product-review count, listing sold count;
+- **seller evidence**: seller rating or positive-feedback percentage, seller-feedback count, seller-wide transactions;
+- **purchase value**: the selected variant's delivered cost divided by usable quantity.
 
-Before scoring sellers, align the listings on the purchase that matters: model/version, specification, condition, included accessories, authenticity evidence, warranty/returns, shipping, taxes, and total delivered price. Exclude a hard mismatch. Keep a meaningful difference only if it remains explicit in the final comparison.
+Never recommend a winner before the input table and scores are calculated.
 
-**Complete when:** every retained listing is genuinely comparable for the user's purchase, or every material difference is explicitly represented rather than silently absorbed into seller reputation.
+## 1. Exhaust the available evidence
 
-## 2. Align seller evidence
+For every candidate, extract all fields already visible in the page, listing, search card, structured data, screenshot, or accessible seller page before asking the user for anything.
 
-For every retained listing collect, when available:
-
-- `R`: seller rating
-- `[L, U]`: the rating scale
-- `n`: seller review/feedback count supporting that rating
-- `s`: seller sales/transaction count
-- the scope and time horizon of each field
-
-Do not mix scopes. Seller-level rating and feedback belong with seller-level sales. A listing-level "sold" count is item popularity, not seller sales, unless the platform explicitly defines it otherwise. Missing is not zero.
-
-**Complete when:** every candidate has a numeric value or explicit `missing` state for each seller field, and no seller-level and listing-level counts are mislabeled as the same signal.
-
-## 3. Calculate SellerScore
-
-Normalize the rating to `[0,1]`:
+Record:
 
 ```text
-r = (R - L) / (U - L)
+candidate_id
+url
+selected_variant
+usable_quantity
+hard_fit
+item_price
+shipping
+tax
+mandatory_fees
+eligible_discount
+product_rating + rating_scale
+product_review_count
+listing_sold_count
+seller_rating + rating_scale OR seller_positive_feedback_pct
+seller_feedback_count
+seller_transaction_count
+scope/time-horizon for every rating or count
 ```
 
-For a 1-5 scale this is `(R - 1) / 4`; for a 0-100 positive-feedback percentage it is `R / 100`.
+A field is either a numeric value with its scope or `missing`. Never infer seller-wide transactions from listing sales, product reviews from seller feedback, or variant-specific evidence from a listing-wide number.
 
-Shrink thin ratings toward the relevant marketplace/category prior:
+Do not ask the user for a field that is already visible or accessible. Ask only when a missing field can still change the winner after the uncertainty check in step 6.
+
+**Complete when:** every candidate has a reproducible input record and every rating/count is labelled product/listing/seller and variant/listing/seller scope.
+
+## 2. Resolve variant and hard-fit integrity
+
+Score the **selected purchasable variant**, not the title, hero image, cheapest teaser variant, or default search-card quantity.
+
+Exclude a candidate (`hard_fit = 0`) if it fails a mandatory requirement such as model/specification, compatibility, authenticity, condition, required mounting method, safety requirement, or other user constraint.
+
+Listing-wide reviews or sold counts may support a selected variant only when the variants are materially the same product and differ only in quantity, colour, size, or another non-material choice. If one listing mixes materially different products, do not attribute its aggregate product evidence to a specific variant.
+
+For safety-related products, treat relevant mounting/configuration requirements and supplied safety hardware as hard-fit facts, not soft price trade-offs.
+
+For marketplace pricing/variant edge cases, use [references/MARKETPLACE-FIELDS.md](references/MARKETPLACE-FIELDS.md).
+
+**Complete when:** every retained candidate is a valid purchase for the user's requirement and every retained evidence field is scope-compatible with its selected variant.
+
+## 3. Calculate delivered value
+
+For each retained candidate:
 
 ```text
-q = (n*r + k*mu) / (n + k)
+delivered_cost =
+    item_price
+  + shipping
+  + tax
+  + mandatory_fees
+  - eligible_discount
+
+unit_cost = delivered_cost / usable_quantity
 ```
 
-where `mu` is the normalized marketplace/category mean and `k` is prior strength. Default `k = 20` when no empirical prior strength is available.
+Only subtract a discount that the user can actually receive for this purchase. Do not put welcome-only, new-account, minimum-spend, bundle, coin, membership, or conditional coupon pricing into the base case unless its condition is satisfied. Calculate conditional promotions as separate scenarios.
 
-Apply diminishing returns to evidence volume:
+Let `Umin` be the lowest `unit_cost` among hard-fit candidates:
 
 ```text
-Vr = min(1, ln(n + 1) / ln(Nr + 1))
-Vs = min(1, ln(s + 1) / ln(Ns + 1))
+ValueScore = 100 * Umin / unit_cost
 ```
 
-`Nr` and `Ns` are reference counts for the relevant marketplace/category. Prefer same-scope population P95 values. If those baselines are unavailable, read [references/CALIBRATION.md](references/CALIBRATION.md) before scoring.
+The cheapest delivered unit therefore scores `100`; every other candidate is a transparent ratio to it.
 
-Combine observed evidence dimensions only:
+**Complete when:** every retained candidate has delivered cost, usable quantity, unit cost, ValueScore, and a separately labelled conditional-price scenario if relevant.
+
+## 4. Calculate listing and seller evidence
+
+Use the same evidence model for the two different populations. Do not mix their inputs.
+
+Normalize a quality metric to `[0,1]`:
 
 ```text
-E = weighted_mean(observed=[Vr, Vs], weights=[0.70, 0.30])
-SellerScore = 100 * q * (0.58 + 0.42*E)
+quality(x, L, U) = clamp((x - L) / (U - L), 0, 1)
 ```
 
-If a count is missing, omit that evidence dimension and renormalize the remaining weights. Do not convert missing to zero. If `n` is missing, do not pretend the displayed rating has known statistical support: use `q = mu` until a defensible review count is found.
+Examples:
 
-Round `SellerScore` only for presentation, never during intermediate calculations.
+```text
+1-5 stars:              quality = (rating - 1) / 4
+0-5 stars:              quality = rating / 5
+positive-feedback pct:  quality = percentage / 100
+```
 
-**Complete when:** every retained listing has either a reproducible SellerScore from scope-compatible evidence or an explicit reason the score cannot be computed defensibly.
+Convert a non-negative evidence count to `[0,1)` with fixed diminishing returns:
 
-## 4. Make the purchase recommendation
+```text
+support(c) = ln(1 + c) / (1 + ln(1 + c))
+```
 
-Apply the signals in this order:
+Then calculate the generic evidence score:
 
-1. **Hard fit:** required model/specification, authenticity, condition, safety, compatibility, and user constraints.
-2. **Item value:** total delivered price, condition, warranty/returns, included extras, and category-specific quality differences.
-3. **Seller confidence:** SellerScore.
+```text
+EvidenceScore(Q, N, S) =
+    100 * (
+        0.45 * Q
+      + 0.30 * support(N)
+      + 0.25 * support(S)
+    )
+```
 
-SellerScore may overturn a small value advantage between otherwise comparable listings; it must not rescue a materially worse, incompatible, suspicious, or overpriced item. Do not add SellerScore to arbitrary item-quality points unless a domain-specific utility model defines what those points mean.
+The weights mean: rating/feedback quality is the largest single signal, while observed review/transaction volume collectively carries slightly more weight (`55%`) than the displayed quality metric (`45%`). They are deterministic defaults, not claimed universal causal coefficients.
 
-When listing-level sales are available, use them as item-popularity evidence alongside item value; do not inject them into SellerScore as seller-wide sales.
+Apply it separately:
 
-**Complete when:** the recommended purchase traces to item fit/value plus seller confidence, and the explanation makes clear which factor changed the ranking.
+```text
+ListingEvidenceScore = EvidenceScore(
+    normalized_product_rating,
+    product_review_count,
+    listing_sold_count
+)
 
-## 5. Verify the ranking
+SellerConfidenceScore = EvidenceScore(
+    normalized_seller_quality,
+    seller_feedback_count,
+    seller_transaction_count
+)
+```
 
-Run these invariants before presenting the result:
+For seller quality, use the platform's seller-wide rating aligned with its seller-feedback population. If the platform exposes only positive-feedback percentage, use that. Do not average overlapping seller reputation metrics merely because both are visible.
 
-- Holding everything else fixed, a higher rating cannot lower SellerScore.
-- Holding rating and the prior relationship fixed, stronger compatible evidence must behave monotonically and with diminishing returns.
-- Additional volume has diminishing, not linear, impact.
-- A tiny perfect-rating sample does not automatically outrank a slightly lower rating backed by substantial evidence.
-- Item price, specification, and condition never alter SellerScore itself.
-- Missing evidence is never treated as observed failure.
+### Missing fields
 
-If any invariant fails, fix the inputs, scope alignment, normalization, or calculation before recommending.
+Do not replace an observed rating with a prior. Preserve it.
 
-**Complete when:** every invariant holds for the scored candidate set.
+For the conservative ranking score, a missing term contributes `0` only to its own weighted contribution. Also compute an upper bound by setting each missing normalized term to `1`:
 
-## Calibration boundary
+```text
+ScoreLower = score with missing terms = 0
+ScoreUpper = score with missing terms = 1
+```
 
-The `0.58/0.42`, `0.70/0.30`, and `k=20` values are calibrated defaults, not universal learned optima. When historical marketplace outcomes exist, or platform fields/scales do not match the assumptions above, use [references/CALIBRATION.md](references/CALIBRATION.md) to estimate or override them rather than inventing precision.
+Thus a visible 5.0 rating remains different from a visible 3.5 rating even when review count is unavailable, while missing supporting evidence cannot create an advantage.
+
+Round displayed scores to **one decimal place**. Keep full precision for ranking.
+
+**Complete when:** every retained candidate has ListingEvidenceScore and SellerConfidenceScore lower/upper bounds from correctly scoped inputs, or the entire axis is explicitly unavailable for all candidates.
+
+## 5. Calculate the overall purchase ranking
+
+Use these normalized active axes for each candidate:
+
+```text
+V = ValueScore / 100
+L = ListingEvidenceScoreLower / 100
+S = SellerConfidenceScoreLower / 100
+```
+
+If an evidence axis is unavailable for **every** candidate, omit that axis for everyone. Never omit an axis only for the candidate that happens to lack data.
+
+If materially different but non-mandatory product attributes remain after hard-fit filtering, add a `FeatureScore` axis using the deterministic rules in [references/MARKETPLACE-FIELDS.md](references/MARKETPLACE-FIELDS.md). Do not invent a feature axis for genuinely equivalent commodity items.
+
+### Dominance
+
+Candidate A **dominates** candidate B when A is at least as good on every active axis and strictly better on at least one:
+
+```text
+A_j >= B_j for every active axis j
+and
+A_j > B_j for at least one j
+```
+
+A dominated candidate cannot rank above the candidate that dominates it.
+
+### Overall score
+
+For the active normalized axes `a1...am`:
+
+```text
+Floor   = min(a1 ... am)
+Balance = (a1 * ... * am) ^ (1 / m)
+
+PurchaseScore = 100 * sqrt(Floor * Balance)
+```
+
+This is deliberately non-compensatory: a terrible value, weak listing evidence, or weak seller cannot be completely hidden by strength elsewhere. It also avoids an arbitrary additive price-vs-reputation exchange rate.
+
+Rank descending by:
+
+```text
+1. hard_fit = 1
+2. PurchaseScore
+3. Floor
+4. Balance
+5. lower unit_cost
+6. higher ListingEvidenceScore
+7. higher SellerConfidenceScore
+```
+
+**Complete when:** every hard-fit candidate has a reproducible overall PurchaseScore and rank, and no dominated candidate outranks its dominator.
+
+## 6. Prove the recommendation is stable enough to state
+
+Before naming the winner:
+
+1. Recalculate the overall ranking once with each active soft axis removed in turn.
+2. For every candidate with missing fields, recalculate its best-case overall score using the corresponding evidence-score upper bounds.
+3. Check whether any missing-field best case can overtake the current winner.
+
+Classify the result:
+
+```text
+DOMINANT     winner Pareto-dominates every other eligible candidate
+ROBUST       same winner under every leave-one-axis-out recalculation and no missing-data upper bound can overtake it
+SENSITIVE    winner changes when an active axis is removed
+INCOMPLETE   a missing-data upper bound can overtake the current winner
+```
+
+If `INCOMPLETE`, obtain the specific missing field(s) capable of changing the winner when accessible. Ask the user only if those decisive fields cannot be obtained from available evidence.
+
+**Complete when:** the winner has one of the four stability labels and every potentially winner-changing missing field has been identified.
+
+## 7. Required output contract
+
+Always show the calculation before the recommendation. At minimum include this table; split it into two tables only if width makes one table unreadable:
+
+```text
+Rank
+Candidate / selected variant
+Hard fit
+Usable quantity
+Delivered cost
+Unit cost
+Product rating
+Product reviews
+Listing sold
+ListingEvidenceScore [lower-upper]
+Seller rating / feedback %
+Seller feedback count
+Seller transactions
+SellerConfidenceScore [lower-upper]
+ValueScore
+FeatureScore (only if active)
+PurchaseScore
+```
+
+Then state, in this order:
+
+1. **Overall purchase ranking** with one winner.
+2. **Value ranking** by unit cost / ValueScore.
+3. **Listing-evidence ranking**.
+4. **Seller-confidence ranking**.
+5. **Stability:** `DOMINANT`, `ROBUST`, `SENSITIVE`, or `INCOMPLETE`.
+6. **Why the overall winner differs from any component winner**, using the actual score differences rather than qualitative phrases.
+
+Do not substitute prose such as "seller confidence may outweigh a small price difference" for the calculation. Do not recommend before the ranked table exists.
+
+**Complete when:** the output contains the scored table, all four requested rankings that have active data, one overall winner, and the stability result.
