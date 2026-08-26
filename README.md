@@ -4,13 +4,37 @@ A reusable Codex skill for comparing marketplace listings using seller rating qu
 
 ## Install in Codex
 
-Run inside Codex:
+`$skill-installer` is a **Codex skill invocation, not a Bash command**.
+
+From your terminal, first start Codex:
+
+```bash
+codex
+```
+
+Then, at the Codex prompt, enter:
 
 ```text
 $skill-installer install https://github.com/future3OOO/evidence-weighted-purchase-ranking/tree/main/skills/evidence-weighted-purchase-ranking
 ```
 
-Restart Codex after installation so the new skill is discovered.
+Restart Codex after installation if the new skill is not discovered immediately.
+
+### Direct shell installation
+
+If you want to install without invoking `$skill-installer`, run this in Bash:
+
+```bash
+set -e
+repo_tmp="$(mktemp -d)"
+dest="${CODEX_HOME:-$HOME/.codex}/skills/evidence-weighted-purchase-ranking"
+test ! -e "$dest" || { echo "Already exists: $dest" >&2; exit 1; }
+git clone --depth 1 https://github.com/future3OOO/evidence-weighted-purchase-ranking.git "$repo_tmp/repo"
+mkdir -p "$(dirname "$dest")"
+cp -a "$repo_tmp/repo/skills/evidence-weighted-purchase-ranking" "$dest"
+rm -rf "$repo_tmp"
+echo "Installed to $dest"
+```
 
 ## Invoke
 
