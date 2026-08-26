@@ -1,18 +1,18 @@
 # Evidence-Weighted Purchase Ranking
 
-A reusable Codex skill for comparing marketplace listings using seller rating quality, review/feedback evidence, and seller sales history without confusing seller reputation with item value.
+A reusable Codex skill that **calculates** marketplace purchase rankings from variant-specific delivered value, product/listing evidence, and seller evidence. It is designed to prevent qualitative recommendation drift: the agent must extract inputs, show intermediate scores, rank candidates, and name one winner.
 
 ## Install in Codex
 
 `$skill-installer` is a **Codex skill invocation, not a Bash command**.
 
-From your terminal, first start Codex:
+From your terminal, start Codex:
 
 ```bash
 codex
 ```
 
-Then, at the Codex prompt, enter:
+Then at the Codex prompt enter:
 
 ```text
 $skill-installer install https://github.com/future3OOO/evidence-weighted-purchase-ranking/tree/main/skills/evidence-weighted-purchase-ranking
@@ -21,8 +21,6 @@ $skill-installer install https://github.com/future3OOO/evidence-weighted-purchas
 Restart Codex after installation if the new skill is not discovered immediately.
 
 ### Direct shell installation
-
-If you want to install without invoking `$skill-installer`, run this in Bash:
 
 ```bash
 set -e
@@ -42,18 +40,27 @@ echo "Installed to $dest"
 $evidence-weighted-purchase-ranking
 ```
 
-The skill is model-invoked as well, so Codex can use it automatically when comparing marketplace listings where seller rating plus review/feedback or sales-volume evidence are available.
+The skill is model-invoked as well. Its trigger covers best-value, best-buy, and ranked marketplace comparisons when price/quantity, product rating/reviews/listing sales, or seller reputation evidence are available.
 
-## What it does
+## Numerical architecture
 
-The skill:
+The runtime skill computes four explicit outputs:
 
-- separates item fit/value from seller confidence;
-- Bayesian-shrinks thin seller ratings toward a marketplace/category prior;
-- log-normalizes review and sales counts so evidence has diminishing returns;
-- combines rating quality and evidence strength into a reproducible `SellerScore`;
-- treats missing evidence as missing rather than observed failure;
-- prevents listing-level sales from being mislabeled as seller-wide sales;
-- supports marketplace-specific calibration and learned coefficients when historical outcomes are available.
+1. **ValueScore** — selected-variant delivered unit cost relative to the cheapest hard-fit candidate.
+2. **ListingEvidenceScore** — product rating + product-review count + listing sold count.
+3. **SellerConfidenceScore** — seller-wide quality + seller-feedback count + seller transactions.
+4. **PurchaseScore** — deterministic non-compensatory combination of the active value/evidence axes, preceded by hard-fit and Pareto-dominance checks.
 
-See [`skills/evidence-weighted-purchase-ranking/SKILL.md`](skills/evidence-weighted-purchase-ranking/SKILL.md) for the runtime skill and [`CALIBRATION.md`](skills/evidence-weighted-purchase-ranking/references/CALIBRATION.md) for calibration guidance.
+Count evidence uses a fixed diminishing-return transform rather than candidate-set P95 calibration. Missing evidence produces lower/upper score bounds instead of replacing observed ratings with an arbitrary prior.
+
+The skill also requires:
+
+- variant-specific quantity and delivered-price verification;
+- explicit separation of listing and seller evidence populations;
+- hard-fit handling for compatibility/safety requirements;
+- a complete scored ranking table before any recommendation;
+- value, listing-evidence, seller-confidence, and overall ranks;
+- dominance and leave-one-axis-out stability checks;
+- explicit identification of missing fields that could change the winner.
+
+See [`SKILL.md`](skills/evidence-weighted-purchase-ranking/SKILL.md) for the runtime calculation and [`MARKETPLACE-FIELDS.md`](skills/evidence-weighted-purchase-ranking/references/MARKETPLACE-FIELDS.md) for marketplace-specific variant, pricing, evidence-scope, safety, and feature rules.
