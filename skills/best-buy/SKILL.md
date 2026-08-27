@@ -24,7 +24,7 @@ The primary result is **evidence-adjusted value**. **Best price** is secondary. 
 ## Run
 
 1. Default to 5 best-matching listings unless user requests another number; infer intent, filter obvious mismatches internally, and ask one concise question only if ambiguity materially changes results.
-2. Research variants, reviews, and sellers across NZ, AU-to-NZ, then international. For AliExpress, assume NZ delivery, skip delivery research/discussion, and use the [Parse.bot CLI](references/ALIEXPRESS-PARSEBOT.md).
+2. Research NZ, AU-to-NZ, then international offers. For AliExpress, use only the [one-call Parse.bot workflow](references/ALIEXPRESS-PARSEBOT.md).
 3. Normalize with `scripts/input-template.json`; read [identity/reviews](references/EVIDENCE-AND-IDENTITY.md), [retailer fields](references/RETAILER-FIELDS.md), and [NZ/AU policy](references/NZ-AU-PURCHASE-POLICY.md) as needed.
 4. Run the existing evidence-adjusted value ranker: `python scripts/rank.py --input comparison.json --format markdown`. Keep insufficient-review products visible but unranked; read [ranking model](references/RANKING-MODEL.md) for interpretation/policy.
 

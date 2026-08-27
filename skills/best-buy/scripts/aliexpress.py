@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Retrieve AliExpress listing and review evidence."""
+"""Retrieve one AliExpress search result set."""
 
 import argparse
 import json
 import os
 import sys
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -12,13 +13,6 @@ from urllib.request import Request, urlopen
 
 DEFAULT_BASE_URL = "https://api.parse.bot/scraper/f989ff95-1fce-426d-935d-2b3787e3f343"
 DEFAULT_API_KEY = "pmx_ebbe02d0944f28d319821134c81d7c4a"
-
-
-def positive_integer(value: str) -> int:
-    number = int(value)
-    if number < 1:
-        raise argparse.ArgumentTypeError("must be a positive integer")
-    return number
 
 
 def fetch(base_url: str, api_key: str, endpoint: str, params: dict[str, object]) -> dict[str, object]:
@@ -59,26 +53,21 @@ def main(argv: list[str] | None = None) -> int:
 
     search = commands.add_parser("search", help="Search AliExpress listings")
     search.add_argument("query")
-    search.add_argument("--page", type=positive_integer, default=1)
     search.add_argument("--sort-by", default="best_match")
+    search.add_argument("--request-marker", type=Path, required=True)
 
-    details = commands.add_parser("details", help="Fetch product details")
-    details.add_argument("product_id")
-
-    reviews = commands.add_parser("reviews", help="Fetch product reviews")
-    reviews.add_argument("product_id")
-    reviews.add_argument("--page", type=positive_integer, default=1)
-    reviews.add_argument("--limit", type=positive_integer, default=50)
     args = parser.parse_args(argv)
-    if args.command == "search":
-        endpoint = "search_products"
-        params = {"query": args.query, "page": args.page, "sort_by": args.sort_by}
-    elif args.command == "details":
-        endpoint = "get_product_details"
-        params = {"product_id": args.product_id}
-    else:
-        endpoint = "get_product_reviews"
-        params = {"product_id": args.product_id, "page": args.page, "limit": args.limit}
+    endpoint = "search_products"
+    params = {"query": args.query, "page": 1, "sort_by": args.sort_by}
+    try:
+        with args.request_marker.open("x", encoding="utf-8", newline="") as marker:
+            marker.write(args.query)
+    except FileExistsError:
+        print("AliExpress request budget already used", file=sys.stderr)
+        return 1
+    except OSError as error:
+        print(f"Could not claim AliExpress request budget: {error}", file=sys.stderr)
+        return 1
 
     try:
         payload = fetch(args.base_url, args.api_key, endpoint, params)

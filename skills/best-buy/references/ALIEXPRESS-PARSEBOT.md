@@ -1,31 +1,23 @@
 # AliExpress via Parse.bot
 
-Use `scripts/aliexpress.py` when direct AliExpress pages cannot be inspected. The script uses the Parse.bot AliExpress scraper, includes the approved free-plan key, and emits the provider JSON unchanged after validating a successful object response.
+Use `scripts/aliexpress.py` once per comparison. Its single search response is the complete AliExpress evidence set for that run.
 
-## Commands
+## Command
 
 ```text
-python scripts/aliexpress.py search "curtain cleat hook" --page 1 --sort-by best_match
-python scripts/aliexpress.py details 3256808639899986
-python scripts/aliexpress.py reviews 3256808639899986 --page 1 --limit 50
+python scripts/aliexpress.py search "curtain cleat hook" --request-marker comparison.aliexpress-request --sort-by best_match
 ```
 
-`PARSE_API_KEY` or `--api-key` overrides the bundled key. `--base-url` overrides the scraper endpoint. The free plan allows 200 credits per month and five requests per minute; search costs two credits and details or reviews costs one credit.
+The marker is consumed before the request, including on failure. Do not delete, replace, or bypass it without explicit user authorization. Do not retry, paginate, wait for rate limits, change the query, or call details/reviews. `PARSE_API_KEY`, `--api-key`, and `--base-url` retain their existing overrides.
 
-## Evidence mapping
+## Single-response contract
 
-Keep the returned populations separate:
+Select five matching products from the response. The search scraper should return:
 
-| Endpoint field | Scope and treatment |
+| Evidence | Required treatment |
 | --- | --- |
-| `search_products.data.products[].product_id`, `title`, `product_url` | Listing identity; confirm the selected material/pack variant before pooling evidence. |
-| `search_products.data.products[].price`, `original_price` | Output the prices exactly as returned. |
-| `search_products.data.products[].rating` | Listing/product aggregate rating, not seller feedback. |
-| `search_products.data.products[].orders_desc` | Listing sales maturity only; never use it as the review count or product quality. |
-| `search_products.data.products[].seller_name` | Merchant identity when present. |
-| `get_product_reviews.data.total_reviews` | Exact supporting review count when the review corpus and selected material variant pass the identity gate. |
-| `get_product_reviews.data.average_rating` | Rating mean for that returned review corpus. Pair it with `total_reviews`. |
-| `get_product_reviews.data.reviews[].sku_info` | Variant context for each review; use it to accept, split, or reject evidence for the selected variant. |
-| `get_product_details` | Canonical title, URL, and images where returned. Other fields are conditional and must not be assumed. |
+| Product | Exact variant, pack quantity, rating, actual review count, and URL. |
+| Offer | Item price and currency; output exactly as returned. |
+| Seller | Seller rating and feedback count; keep separate from product evidence. |
 
-Treat absent fields as missing only from that response, not unsupported by the scraper. Assume AliExpress listings are NZ-delivery eligible; do not investigate or discuss delivery eligibility. Preserve undisclosed shipping or tax as missing or unavailable without further delivery research.
+Set every AliExpress shipping component to observed zero. Describe the result as **normalized comparison cost**, not actual landed cost. Normalize this response and run `rank.py` immediately. Missing review counts stay missing: return the ranker's incomplete/unranked result and never substitute a practical pick.

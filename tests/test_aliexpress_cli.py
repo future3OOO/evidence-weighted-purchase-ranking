@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -13,11 +14,12 @@ SCRIPT = REPO / "skills" / "best-buy" / "scripts" / "aliexpress.py"
 
 
 class AliExpressCliTests(unittest.TestCase):
-    def test_search_sends_auth_and_query_then_emits_provider_data(self) -> None:
+    def test_search_uses_one_provider_call_per_marker(self) -> None:
         observed = {}
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:
+                observed["calls"] = observed.get("calls", 0) + 1
                 parsed = urlparse(self.path)
                 observed["path"] = parsed.path
                 observed["query"] = parse_qs(parsed.query)
@@ -51,8 +53,8 @@ class AliExpressCliTests(unittest.TestCase):
         thread = threading.Thread(target=server.serve_forever)
         thread.start()
         try:
-            result = subprocess.run(
-                [
+            with tempfile.TemporaryDirectory() as temp_dir:
+                command = [
                     sys.executable,
                     str(SCRIPT),
                     "--base-url",
@@ -61,16 +63,13 @@ class AliExpressCliTests(unittest.TestCase):
                     "test-key",
                     "search",
                     "curtain cleat",
-                    "--page",
-                    "2",
+                    "--request-marker",
+                    str(Path(temp_dir) / "request-used"),
                     "--sort-by",
                     "orders_desc",
-                ],
-                capture_output=True,
-                check=False,
-                encoding="utf-8",
-                text=True,
-            )
+                ]
+                result = subprocess.run(command, capture_output=True, check=False, encoding="utf-8", text=True)
+                second = subprocess.run(command, capture_output=True, check=False, encoding="utf-8", text=True)
         finally:
             server.shutdown()
             server.server_close()
@@ -81,20 +80,46 @@ class AliExpressCliTests(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout)["data"]["products"][0]["title"], "窗帘挂钩")
         self.assertEqual(observed["path"], "/search_products")
         self.assertEqual(observed["query"]["query"], ["curtain cleat"])
-        self.assertEqual(observed["query"]["page"], ["2"])
+        self.assertEqual(observed["query"]["page"], ["1"])
         self.assertEqual(observed["query"]["sort_by"], ["orders_desc"])
         self.assertEqual(observed["api_key"], "test-key")
+        self.assertEqual(second.returncode, 1)
+        self.assertIn("request budget already used", second.stderr)
+        self.assertEqual(observed["calls"], 1)
 
-    def test_pagination_must_be_positive(self) -> None:
+    def test_details_command_is_not_available(self) -> None:
         result = subprocess.run(
-            [sys.executable, str(SCRIPT), "search", "curtain cleat", "--page", "0"],
+            [sys.executable, str(SCRIPT), "--base-url", "http://127.0.0.1:1", "details", "123"],
             capture_output=True,
             check=False,
             text=True,
         )
 
         self.assertEqual(result.returncode, 2)
-        self.assertIn("must be a positive integer", result.stderr)
+        self.assertIn("invalid choice", result.stderr)
+
+    def test_pagination_is_not_available(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--base-url",
+                    "http://127.0.0.1:1",
+                    "search",
+                    "curtain cleat",
+                    "--request-marker",
+                    str(Path(temp_dir) / "request-used"),
+                    "--page",
+                    "2",
+                ],
+                capture_output=True,
+                check=False,
+                text=True,
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unrecognized arguments", result.stderr)
 
 
 if __name__ == "__main__":
