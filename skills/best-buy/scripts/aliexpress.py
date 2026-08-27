@@ -72,6 +72,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         payload = fetch(args.base_url, args.api_key, endpoint, params)
     except RuntimeError as error:
+        try:
+            args.request_marker.unlink()
+        except OSError as cleanup_error:
+            print(f"{error}; could not release request marker: {cleanup_error}", file=sys.stderr)
+            return 1
         print(str(error), file=sys.stderr)
         return 1
     sys.stdout.reconfigure(encoding="utf-8")

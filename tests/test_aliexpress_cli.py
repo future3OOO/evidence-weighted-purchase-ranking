@@ -20,6 +20,10 @@ class AliExpressCliTests(unittest.TestCase):
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:
                 observed["calls"] = observed.get("calls", 0) + 1
+                if observed["calls"] == 1:
+                    self.send_response(429)
+                    self.end_headers()
+                    return
                 parsed = urlparse(self.path)
                 observed["path"] = parsed.path
                 observed["query"] = parse_qs(parsed.query)
@@ -68,13 +72,18 @@ class AliExpressCliTests(unittest.TestCase):
                     "--sort-by",
                     "orders_desc",
                 ]
+                failed = subprocess.run(command, capture_output=True, check=False, encoding="utf-8", text=True)
+                marker_released = not (Path(temp_dir) / "request-used").exists()
                 result = subprocess.run(command, capture_output=True, check=False, encoding="utf-8", text=True)
-                second = subprocess.run(command, capture_output=True, check=False, encoding="utf-8", text=True)
+                blocked = subprocess.run(command, capture_output=True, check=False, encoding="utf-8", text=True)
         finally:
             server.shutdown()
             server.server_close()
             thread.join()
 
+        self.assertEqual(failed.returncode, 1)
+        self.assertIn("HTTP 429", failed.stderr)
+        self.assertTrue(marker_released)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["data"]["products"][0]["product_id"], "123")
         self.assertEqual(json.loads(result.stdout)["data"]["products"][0]["title"], "窗帘挂钩")
@@ -83,9 +92,9 @@ class AliExpressCliTests(unittest.TestCase):
         self.assertEqual(observed["query"]["page"], ["1"])
         self.assertEqual(observed["query"]["sort_by"], ["orders_desc"])
         self.assertEqual(observed["api_key"], "test-key")
-        self.assertEqual(second.returncode, 1)
-        self.assertIn("request budget already used", second.stderr)
-        self.assertEqual(observed["calls"], 1)
+        self.assertEqual(blocked.returncode, 1)
+        self.assertIn("request budget already used", blocked.stderr)
+        self.assertEqual(observed["calls"], 2)
 
     def test_details_command_is_not_available(self) -> None:
         result = subprocess.run(
