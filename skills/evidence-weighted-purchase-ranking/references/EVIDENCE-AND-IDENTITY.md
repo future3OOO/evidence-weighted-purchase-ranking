@@ -31,11 +31,21 @@ Listing-family reviews may support a selected variant only when all reviewed var
 
 ## Adaptive review evidence
 
+- `evidence_type` defaults to `consumer_reviews` when absent. Use `expert_test` only for a scored test by an independent specialist source, and set `independent: true`; dependent or unidentified tests are excluded from value eligibility. One expert source represents one scored test observation, so its rating must omit consumer-style `count` and `histogram` fields; record separate independent tests as separate corpora.
 - A full star histogram determines count, mean, low-star share, and dispersion inputs.
 - Average + count supplies a bounded rating mean and support count.
 - Rating with count unavailable remains visible, contributes provisional `n=1`, and sets `count_uncertain`.
 - Written comments affect hard-fit or separately reported recurring risks only when the evidence supports that finding. Partial comments never receive free-form sentiment points.
 - No reviews use the versioned prior interval; the product remains eligible rather than becoming zero-quality or perfect.
+
+The scorer labels product evidence independently from its estimated ProductFactor:
+
+- `evidence_backed`: at least the configured known-count exact consumer-review minimum, or a configured exact independent expert test;
+- `limited_evidence`: usable exact evidence below the value threshold, including an exact rating whose supporting count is unavailable or an otherwise usable expert test that policy does not admit;
+- `unrated`: no usable exact evidence;
+- `ambiguous_evidence`: visible evidence cannot be assigned to the selected product or material variant.
+
+Only `evidence_backed` products enter the evidence-backed value ranking. The prior remains available for uncertainty and unverified-contender sensitivity, but never grants eligibility. Deduplicated corpora count once; probable and ambiguous sources count zero toward thresholds.
 
 Record source URL, observation time, rating scale, count scope, verification/incentive/staff/syndication labels, and whether evidence is product-, listing-, variant-, store-, or seller-wide.
 

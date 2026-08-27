@@ -2,6 +2,16 @@
 
 import math
 from collections.abc import Sequence
+from typing import NamedTuple
+
+
+class CorpusEvidence(NamedTuple):
+    normalized_rating: float
+    count: float
+    low_count: float | None
+    source_id: str
+    count_uncertain: bool
+    evidence_type: str
 
 
 def require_mapping(value: object, label: str) -> dict[str, object]:
@@ -164,6 +174,30 @@ def policy_number(policy: dict[str, object], section: str, key: str) -> float:
     return number
 
 
+def evidence_policy(policy: dict[str, object]) -> tuple[float, float, bool]:
+    value_minimum = require_number(
+        policy.get("minimum_exact_reviews_for_value"),
+        "policy.minimum_exact_reviews_for_value",
+    )
+    limited_minimum = require_number(
+        policy.get("minimum_exact_reviews_for_limited"),
+        "policy.minimum_exact_reviews_for_limited",
+    )
+    if (
+        not value_minimum.is_integer()
+        or value_minimum < 1
+        or not limited_minimum.is_integer()
+        or limited_minimum < 1
+        or limited_minimum > value_minimum
+    ):
+        raise ValueError("policy review evidence thresholds are invalid")
+    if not isinstance(policy.get("allow_expert_test_as_evidence"), bool):
+        raise ValueError("policy.allow_expert_test_as_evidence must be boolean")
+    return value_minimum, limited_minimum, bool(
+        policy["allow_expert_test_as_evidence"]
+    )
+
+
 def validate_policy(policy: dict[str, object]) -> None:
     for section in ("product_prior", "seller_prior"):
         require_mapping(policy.get(section), f"policy.{section}")
@@ -176,6 +210,27 @@ def validate_policy(policy: dict[str, object]) -> None:
     upper = policy_number(policy, "credible_interval", "upper")
     if lower >= upper:
         raise ValueError("policy.credible_interval.lower must be less than upper")
+    evidence_policy(policy)
+
+
+def evidence_status(
+    policy: dict[str, object],
+    exact_consumer_review_count: float,
+    independent_expert_test_count: int,
+    has_exact_evidence: bool,
+    has_ambiguous_evidence: bool,
+) -> str:
+    value_minimum, limited_minimum, allow_expert = evidence_policy(policy)
+    expert_is_eligible = (
+        allow_expert and independent_expert_test_count > 0
+    )
+    if exact_consumer_review_count >= value_minimum or expert_is_eligible:
+        return "evidence_backed"
+    if exact_consumer_review_count >= limited_minimum or has_exact_evidence:
+        return "limited_evidence"
+    if has_ambiguous_evidence:
+        return "ambiguous_evidence"
+    return "unrated"
 
 
 def score_product(product_value: object, policy: dict[str, object]) -> dict[str, object]:
@@ -198,9 +253,10 @@ def score_product(product_value: object, policy: dict[str, object]) -> dict[str,
             "identity confidence and identifiers/specification evidence are required",
         ))
 
-    unique_corpora: dict[str, tuple[float, float, float | None, str, bool]] = {}
+    unique_corpora: dict[str, CorpusEvidence] = {}
     deduplicated_source_ids: list[str] = []
     excluded_source_ids: list[str] = []
+    ambiguous_source_ids: list[str] = []
     source_summaries: list[dict[str, object]] = []
     seen_source_ids: set[str] = set()
     for index, source_value in enumerate(
@@ -222,6 +278,8 @@ def score_product(product_value: object, policy: dict[str, object]) -> dict[str,
                 "identity_match": source.get("identity_match"),
                 "observed_at": source.get("observed_at"),
                 "labels": source.get("labels", []),
+                "evidence_type": source.get("evidence_type", "consumer_reviews"),
+                "independent": source.get("independent"),
             }
         )
         if not source.get("url") and not source.get("source_ref"):
@@ -234,32 +292,65 @@ def score_product(product_value: object, policy: dict[str, object]) -> dict[str,
                 f"products.{product_id}.review_sources.{source_id}.observed_at",
                 "review evidence requires an observation time",
             ))
+        source_type = source.get("evidence_type", "consumer_reviews")
+        if source_type not in {"consumer_reviews", "expert_test"}:
+            raise ValueError(
+                f"product {product_id} review source {source_id} has invalid evidence_type"
+            )
         if source.get("identity_match") != "exact":
+            excluded_source_ids.append(source_id)
+            ambiguous_source_ids.append(source_id)
+            continue
+        if source_type == "expert_test" and source.get("independent") is not True:
             excluded_source_ids.append(source_id)
             continue
         corpus_id = source.get("corpus_id")
         if not isinstance(corpus_id, str) or not corpus_id:
             raise ValueError(f"product {product_id} exact review source requires corpus_id")
         rating = require_mapping(source.get("rating"), f"review source {corpus_id}.rating")
+        if source_type == "expert_test" and (
+            "count" in rating or "histogram" in rating
+        ):
+            raise ValueError(
+                f"product {product_id} expert_test rating must omit count and histogram"
+            )
         normalized, count, low_count, count_uncertain = normalized_rating(
             rating, f"review source {corpus_id}.rating"
         )
         previous = unique_corpora.get(corpus_id)
-        if previous is None or count > previous[1]:
+        if previous is not None and previous.evidence_type != source_type:
+            raise ValueError(
+                f"product {product_id} corpus {corpus_id} has conflicting evidence types"
+            )
+        if previous is None or count > previous.count:
             if previous is not None:
-                deduplicated_source_ids.append(previous[3])
-            unique_corpora[corpus_id] = (
+                deduplicated_source_ids.append(previous.source_id)
+            unique_corpora[corpus_id] = CorpusEvidence(
                 normalized,
                 count,
                 low_count,
                 source_id,
                 count_uncertain,
+                source_type,
             )
         else:
             deduplicated_source_ids.append(source_id)
 
-    reviewed_count = sum(corpus[1] for corpus in unique_corpora.values())
-    observed_successes = sum(corpus[0] * corpus[1] for corpus in unique_corpora.values())
+    reviewed_count = sum(corpus.count for corpus in unique_corpora.values())
+    exact_consumer_review_count = sum(
+        corpus.count
+        for corpus in unique_corpora.values()
+        if corpus.evidence_type == "consumer_reviews" and not corpus.count_uncertain
+    )
+    independent_expert_test_count = sum(
+        1
+        for corpus in unique_corpora.values()
+        if corpus.evidence_type == "expert_test"
+    )
+    observed_successes = sum(
+        corpus.normalized_rating * corpus.count
+        for corpus in unique_corpora.values()
+    )
     alpha = policy_number(policy, "product_prior", "alpha") + observed_successes
     beta = policy_number(policy, "product_prior", "beta") + reviewed_count - observed_successes
     quality_lower = beta_quantile(
@@ -271,9 +362,13 @@ def score_product(product_value: object, policy: dict[str, object]) -> dict[str,
     observed_mean = observed_successes / reviewed_count if reviewed_count else None
     product_factor = min(observed_mean, quality_lower) if observed_mean is not None else quality_lower
     low_star_share = None
-    if unique_corpora and all(corpus[2] is not None for corpus in unique_corpora.values()):
-        low_star_share = sum(float(corpus[2]) for corpus in unique_corpora.values()) / reviewed_count
-    used_source_ids = sorted(corpus[3] for corpus in unique_corpora.values())
+    if unique_corpora and all(
+        corpus.low_count is not None for corpus in unique_corpora.values()
+    ):
+        low_star_share = sum(
+            float(corpus.low_count) for corpus in unique_corpora.values()
+        ) / reviewed_count
+    used_source_ids = sorted(corpus.source_id for corpus in unique_corpora.values())
     used_set = set(used_source_ids)
     deduplicated_set = set(deduplicated_source_ids)
     review_source_decisions = [
@@ -289,6 +384,13 @@ def score_product(product_value: object, policy: dict[str, object]) -> dict[str,
         }
         for summary in source_summaries
     ]
+    classification = evidence_status(
+        policy,
+        exact_consumer_review_count,
+        independent_expert_test_count,
+        reviewed_count > 0,
+        bool(ambiguous_source_ids),
+    )
     return {
         "product_id": product_id,
         "name": product.get("name"),
@@ -301,8 +403,14 @@ def score_product(product_value: object, policy: dict[str, object]) -> dict[str,
         "quality_high": quality_upper,
         "observed_normalized_rating": observed_mean,
         "review_count_used": reviewed_count,
+        "exact_consumer_review_count": exact_consumer_review_count,
+        "independent_expert_test_count": independent_expert_test_count,
+        "evidence_status": classification,
+        "value_eligible": classification == "evidence_backed",
         "low_star_share": low_star_share,
-        "count_uncertain": any(corpus[4] for corpus in unique_corpora.values()),
+        "count_uncertain": any(
+            corpus.count_uncertain for corpus in unique_corpora.values()
+        ),
         "used_source_ids": used_source_ids,
         "deduplicated_source_ids": sorted(deduplicated_source_ids),
         "excluded_source_ids": sorted(excluded_source_ids),
@@ -501,6 +609,13 @@ def score_offer(
         "useful_quantity": needed_quantity,
         "surplus_quantity": received_quantity - needed_quantity,
         "product_factor": product_factor,
+        "evidence_status": products[product_id]["evidence_status"],
+        "value_eligible": products[product_id]["value_eligible"],
+        "product_identity_confidence": (
+            products[product_id]["identity"].get("confidence")
+            if isinstance(products[product_id].get("identity"), dict)
+            else None
+        ),
         "seller_factor": seller_factor,
         "seller_factor_high": seller_factor_high,
         "seller_feedback_count": seller_feedback_count,

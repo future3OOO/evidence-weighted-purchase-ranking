@@ -36,6 +36,8 @@ Prefer, in order:
 
 Record whether reviews are verified-purchase, staff, incentivized/promotional, native, manufacturer-syndicated, or unknown. Record the review provider and corpus ID when visible. Do not assume every solicited or moderated review is verified.
 
+Record `evidence_type: consumer_reviews` for ordinary purchaser ratings. Use `expert_test` plus `independent: true` only for an independent specialist test with a reproducible score. A displayed rating without a known count can inform sensitivity but cannot satisfy the exact-review threshold.
+
 ## Selected variant and quantity
 
 Score the purchasable selected variant, not the title, hero image, teaser price, or default search card. Resolve:

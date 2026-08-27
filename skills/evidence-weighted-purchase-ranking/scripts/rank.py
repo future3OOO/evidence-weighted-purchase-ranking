@@ -82,7 +82,7 @@ def rank_comparison(payload: object, policy: dict[str, object]) -> dict[str, obj
     offers.sort(key=lambda offer: str(offer["offer_id"]))
 
     region_order = {"NZ": 0, "AU": 1, "international": 2}
-    ranking = sorted(
+    diagnostic_ranking = sorted(
         offers,
         key=lambda offer: (
             upper_sort_value(offer["decision_cost"]),
@@ -101,6 +101,10 @@ def rank_comparison(payload: object, policy: dict[str, object]) -> dict[str, obj
             str(offer["offer_id"]),
         ),
     )
+    ranking = [offer for offer in diagnostic_ranking if offer["value_eligible"]]
+    unverified_value_contenders = [
+        offer for offer in diagnostic_ranking if not offer["value_eligible"]
+    ]
     raw_ranking = sorted(
         offers,
         key=lambda offer: (
@@ -113,9 +117,15 @@ def rank_comparison(payload: object, policy: dict[str, object]) -> dict[str, obj
     raw_contenders = raw_landed_contenders(raw_leader, raw_ranking, offers)
     raw_status = "incomplete" if raw_contenders else "robust"
 
-    winner = ranking[0] if ranking else None
-    set_unknown_cost_break_evens(winner, offers)
-    status = ranking_status(winner, offers)
+    leader = ranking[0] if ranking else None
+    set_unknown_cost_break_evens(leader, offers)
+    status = ranking_status(leader, ranking)
+    if (
+        status == "robust"
+        and leader is not None
+        and leader.get("product_identity_confidence") != "exact"
+    ):
+        status = "provisional"
 
     provenance_warnings = [
         warning
@@ -149,6 +159,13 @@ def rank_comparison(payload: object, policy: dict[str, object]) -> dict[str, obj
         "offers": offers,
         "excluded": sorted(excluded, key=lambda item: item["offer_id"]),
         "ranking": [{"rank": index + 1, **offer} for index, offer in enumerate(ranking)],
+        "price_ranking": [
+            {"rank": index + 1, **offer} for index, offer in enumerate(raw_ranking)
+        ],
+        "unverified_value_contenders": [
+            {"rank": index + 1, **offer}
+            for index, offer in enumerate(unverified_value_contenders)
+        ],
         "raw_landed_ranking": [offer["offer_id"] for offer in raw_ranking],
         "raw_landed_winner": (
             raw_leader["offer_id"]
@@ -158,8 +175,33 @@ def rank_comparison(payload: object, policy: dict[str, object]) -> dict[str, obj
         "raw_landed_leader": raw_leader["offer_id"] if raw_leader else None,
         "raw_landed_status": raw_status,
         "raw_landed_contenders": sorted(raw_contenders),
-        "winner": winner["offer_id"] if winner else None,
-        "regional_alternative": regional_alternative(winner, ranking),
+        "best_price": {
+            "status": raw_status,
+            "winner": (
+                raw_leader["offer_id"]
+                if raw_leader is not None and raw_status == "robust"
+                else None
+            ),
+            "leader": raw_leader["offer_id"] if raw_leader else None,
+            "contenders": sorted(raw_contenders),
+            "ranking": [offer["offer_id"] for offer in raw_ranking],
+        },
+        "evidence_backed_value": {
+            "status": status,
+            "winner": leader["offer_id"] if leader is not None and status == "robust" else None,
+            "leader": leader["offer_id"] if leader else None,
+            "ranking": [offer["offer_id"] for offer in ranking],
+            "unverified_contenders": [
+                {
+                    "offer_id": offer["offer_id"],
+                    "evidence_status": offer["evidence_status"],
+                }
+                for offer in unverified_value_contenders
+            ],
+        },
+        "winner": leader["offer_id"] if leader is not None and status == "robust" else None,
+        "leader": leader["offer_id"] if leader else None,
+        "regional_alternative": regional_alternative(leader, ranking),
         "provenance_warnings": provenance_warnings,
         "status": status,
     }
@@ -215,7 +257,7 @@ def ranking_status(
     winner: dict[str, object] | None, offers: list[dict[str, object]]
 ) -> str:
     if winner is None:
-        return "robust"
+        return "incomplete"
     if winner["decision_cost"] is None:
         return "incomplete"
     provisional = False
@@ -323,30 +365,38 @@ def render_markdown(result: dict[str, object]) -> str:
     }
     offers = result_rows(result, "offers")
     ranking = result_rows(result, "ranking")
-    raw_order = require_sequence(result.get("raw_landed_ranking"), "raw_landed_ranking")
-    raw_contenders = require_sequence(
-        result.get("raw_landed_contenders"), "raw_landed_contenders"
+    price_ranking = result_rows(result, "price_ranking")
+    unverified = result_rows(result, "unverified_value_contenders")
+    best_price = require_mapping(result.get("best_price"), "best_price")
+    best_value = require_mapping(
+        result.get("evidence_backed_value"), "evidence_backed_value"
     )
-    raw_winner = result.get("raw_landed_winner")
+    price_winner = best_price.get("winner")
+    value_winner = best_value.get("winner")
+    value_leader = best_value.get("leader")
     lines = [
         "# Purchase ranking",
         "",
-        f"Winner: `{result.get('winner')}`" if result.get("winner") else "Winner: none",
-        f"Status: `{result.get('status')}`",
-        f"Model: `{result.get('model_version')}`",
-        f"Raw landed-cost status: `{result.get('raw_landed_status')}`",
         (
-            f"Raw landed-cost winner: `{raw_winner}`"
-            if raw_winner is not None
-            else "Raw landed-cost winner: unresolved; conservative leader "
-            f"`{result.get('raw_landed_leader')}`, contenders "
-            f"{', '.join(str(value) for value in raw_contenders)}"
+            f"Evidence-backed value winner: `{value_winner}`"
+            if value_winner is not None
+            else f"Evidence-backed value leader: `{value_leader}`"
+            if value_leader is not None
+            else "Evidence-backed best value: incomplete - no eligible product"
         ),
-        "Raw landed-cost order: " + " -> ".join(f"`{value}`" for value in raw_order),
+        f"Evidence-backed value status: `{best_value.get('status')}`",
+        (
+            f"Best-price winner: `{price_winner}`"
+            if price_winner is not None
+            else "Best-price winner: unresolved; leader "
+            f"`{best_price.get('leader')}`"
+        ),
+        f"Best-price status: `{best_price.get('status')}`",
+        f"Model: `{result.get('model_version')}`",
         "",
-        "## Overall ranking",
+        "## Evidence-backed best value",
         "",
-        "Decision cost is lower-is-better; bounds preserve unresolved evidence.",
+        "Only evidence-backed products are eligible. Decision cost is lower-is-better.",
         "",
         "| Rank | Offer | Product | Region | Landed NZD low-high | Useful qty | Region factor | Product factor | Seller factor | Decision best | Decision worst |",
         "| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
@@ -362,6 +412,36 @@ def render_markdown(result: dict[str, object]) -> str:
             display_number(item.get("seller_factor"), 3),
             display_number(item.get("decision_cost_best")),
             display_number(item.get("decision_cost_worst")),
+        ))
+
+    if unverified:
+        start_table(
+            lines, "Unverified value contenders",
+            "| Diagnostic rank | Offer | Product | Evidence status | Landed NZD low-high | Product factor |",
+            "| ---: | --- | --- | --- | ---: | ---: |",
+        )
+        for item in unverified:
+            lines.append(markdown_row(
+                item.get("rank"), item.get("offer_id"), item.get("product_id"),
+                item.get("evidence_status"),
+                f"{display_number(item.get('landed_cost_low_nzd'))}-{display_number(item.get('landed_cost_high_nzd'))}",
+                display_number(item.get("product_factor"), 3),
+            ))
+
+    lines.extend([
+        "",
+        "## Best price",
+        "",
+        "Resolved landed cost only; product evidence does not affect this order.",
+        "",
+        "| Rank | Offer | Product | Landed NZD low-high | Evidence status |",
+        "| ---: | --- | --- | ---: | --- |",
+    ])
+    for item in price_ranking:
+        lines.append(markdown_row(
+            item.get("rank"), item.get("offer_id"), item.get("product_id"),
+            f"{display_number(item.get('landed_cost_low_nzd'))}-{display_number(item.get('landed_cost_high_nzd'))}",
+            item.get("evidence_status"),
         ))
 
     start_table(
@@ -380,14 +460,16 @@ def render_markdown(result: dict[str, object]) -> str:
 
     start_table(
         lines, "Product evidence",
-        "| Rank | Product | Identity | Reviews used | Product factor | Quality low | Quality mean | Quality high | Low-star share |",
-        "| ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Rank | Product | Evidence status | Identity | Exact consumer reviews | Expert tests | Product factor | Quality low | Quality mean | Quality high | Low-star share |",
+        "| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     )
     for product in products:
         lines.append(markdown_row(
             quality_rank_by_id[str(product.get("product_id"))], product.get("product_id"),
+            product.get("evidence_status"),
             json.dumps(product.get("identity"), sort_keys=True),
-            display_number(product.get("review_count_used"), 0),
+            display_number(product.get("exact_consumer_review_count"), 0),
+            display_number(product.get("independent_expert_test_count"), 0),
             display_number(product.get("product_factor"), 3),
             display_number(product.get("quality_low"), 3),
             display_number(product.get("quality_mean"), 3),
@@ -397,8 +479,8 @@ def render_markdown(result: dict[str, object]) -> str:
 
     start_table(
         lines, "Review-source decisions",
-        "| Product | Source | Status | Corpus | Identity match | URL | Observed | Labels |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Product | Source | Status | Evidence type | Corpus | Identity match | URL | Observed | Labels |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     )
     for product in products:
         for source_value in require_sequence(
@@ -411,6 +493,7 @@ def render_markdown(result: dict[str, object]) -> str:
             )
             lines.append(markdown_row(
                 product.get("product_id"), source.get("id"), source.get("status"),
+                source.get("evidence_type"),
                 source.get("corpus_id"), source.get("identity_match"),
                 source.get("url") or source.get("source_ref"),
                 source.get("observed_at"), labels,
