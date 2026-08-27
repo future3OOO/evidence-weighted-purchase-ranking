@@ -633,6 +633,9 @@ class RankingCliTests(unittest.TestCase):
         self.assertEqual(result["status"], "provisional")
         self.assertIsNone(result["winner"])
         self.assertEqual(result["leader"], "bounded-shipping")
+        self.assertEqual(result["best_price"]["status"], "incomplete")
+        self.assertIsNone(result["best_price"]["winner"])
+        self.assertEqual(result["best_price"]["leader"], "bounded-shipping")
         self.assertEqual(scored["landed_cost_low_nzd"], 15.0)
         self.assertEqual(scored["landed_cost_high_nzd"], 25.0)
         self.assertNotIn("landed_cost_nzd", scored)
@@ -648,6 +651,33 @@ class RankingCliTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("landed range NZ$15.00-NZ$25.00", completed.stdout)
         self.assertNotIn("break-even NZ$unknown", completed.stdout)
+
+    def test_bounded_rival_can_make_resolved_best_price_incomplete(self) -> None:
+        bounded = self.offer("bounded-rival", "same-product", price=10)
+        bounded["cost"]["components"]["shipping"] = {
+            "state": "ambiguous",
+            "lower_amount": 0,
+            "upper_amount": 20,
+        }
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+            },
+            "products": [self.rated_product("same-product", 4.8, 20)],
+            "offers": [
+                self.offer("resolved-leader", "same-product", price=20),
+                bounded,
+            ],
+        }
+
+        result = self.run_ranker(comparison)
+
+        self.assertEqual(result["best_price"]["status"], "incomplete")
+        self.assertIsNone(result["best_price"]["winner"])
+        self.assertEqual(result["best_price"]["leader"], "resolved-leader")
+        self.assertEqual(result["best_price"]["contenders"], ["bounded-rival"])
 
     def test_exact_offer_tie_is_explicitly_provisional(self) -> None:
         comparison = {

@@ -115,7 +115,16 @@ def rank_comparison(payload: object, policy: dict[str, object]) -> dict[str, obj
     )
     raw_leader = raw_ranking[0] if raw_ranking else None
     raw_contenders = raw_landed_contenders(raw_leader, raw_ranking, offers)
-    raw_status = "incomplete" if raw_leader is None or raw_contenders else "robust"
+    raw_leader_unresolved = (
+        raw_leader is not None
+        and raw_leader["landed_cost_low_nzd"]
+        != raw_leader["landed_cost_high_nzd"]
+    )
+    raw_status = (
+        "incomplete"
+        if raw_leader is None or raw_leader_unresolved or raw_contenders
+        else "robust"
+    )
 
     leader = ranking[0] if ranking else None
     set_unknown_cost_break_evens(leader, offers)
@@ -230,7 +239,8 @@ def raw_landed_contenders(
     return [
         str(offer["offer_id"])
         for offer in offers
-        if offer["landed_cost_high_nzd"] is None
+        if offer is not leader
+        and offer["landed_cost_low_nzd"] != offer["landed_cost_high_nzd"]
         and require_number(offer["landed_cost_low_nzd"], "landed_cost_low_nzd")
         <= require_number(leader_high, "raw leader cost")
     ]
@@ -270,7 +280,9 @@ def ranking_status(
         return "incomplete"
     if winner["decision_cost"] is None:
         return "incomplete"
-    provisional = bool(winner["unknown_cost_components"])
+    provisional = (
+        winner["landed_cost_low_nzd"] != winner["landed_cost_high_nzd"]
+    )
     for rival in offers:
         if rival is winner:
             continue
