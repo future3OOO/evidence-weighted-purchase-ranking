@@ -56,12 +56,15 @@ python scripts/rank.py --input comparison.json --format markdown
 
 The scorer uses only the Python standard library. Its normalized JSON boundary is intentionally retailer-agnostic; the browser/agent extracts evidence, and the script validates, aggregates, scores, orders, and explains it.
 
+For AliExpress research, `scripts/aliexpress.py` calls the Parse.bot search, details, and reviews endpoints with the bundled free-plan key. It keeps listing sales separate from exact review support and leaves undisclosed seller or shipping evidence unresolved.
+
 ## Files
 
 - [`SKILL.md`](skills/best-buy/SKILL.md): concise runtime workflow and output contract.
 - [`RANKING-MODEL.md`](skills/best-buy/references/RANKING-MODEL.md): formulas and interpretation.
 - [`EVIDENCE-AND-IDENTITY.md`](skills/best-buy/references/EVIDENCE-AND-IDENTITY.md): exact-product matching and review-corpus deduplication.
 - [`RETAILER-FIELDS.md`](skills/best-buy/references/RETAILER-FIELDS.md): adaptive extraction for direct retailers and marketplaces.
+- [`ALIEXPRESS-PARSEBOT.md`](skills/best-buy/references/ALIEXPRESS-PARSEBOT.md): AliExpress API commands and evidence-field mapping.
 - [`NZ-AU-PURCHASE-POLICY.md`](skills/best-buy/references/NZ-AU-PURCHASE-POLICY.md): regional sourcing and landed-cost rules.
 - [`default-policy.json`](skills/best-buy/scripts/default-policy.json): versioned executable defaults.
 

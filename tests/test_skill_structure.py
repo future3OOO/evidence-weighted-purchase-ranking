@@ -24,6 +24,7 @@ class SkillStructureTests(unittest.TestCase):
             "references/RANKING-MODEL.md",
             "references/NZ-AU-PURCHASE-POLICY.md",
             "references/CALIBRATION.md",
+            "references/ALIEXPRESS-PARSEBOT.md",
         }
         self.assertLessEqual(required_links, set(linked_paths))
         for linked_path in linked_paths:
@@ -49,6 +50,7 @@ class SkillStructureTests(unittest.TestCase):
         self.assertTrue((SKILL_DIR / "scripts" / "model.py").is_file())
         self.assertTrue((SKILL_DIR / "scripts" / "default-policy.json").is_file())
         self.assertTrue((SKILL_DIR / "scripts" / "input-template.json").is_file())
+        self.assertTrue((SKILL_DIR / "scripts" / "aliexpress.py").is_file())
 
 
 if __name__ == "__main__":
