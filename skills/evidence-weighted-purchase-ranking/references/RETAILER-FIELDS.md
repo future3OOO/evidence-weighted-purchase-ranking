@@ -10,7 +10,7 @@ Use this reference while extracting normalized input. Do not create site-specifi
 - `not_applicable`: the population or charge does not exist for this offer.
 - `ambiguous`: visible but its product, variant, seller, time, or pricing scope cannot be resolved.
 
-Never convert the last four states to observed zero.
+`not_applicable` contributes zero to landed cost. Never convert `missing`, `unavailable`, or `ambiguous` to observed zero.
 
 ## Adaptive evidence matrix
 

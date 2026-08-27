@@ -1,6 +1,7 @@
 {
   "comparison": {
     "destination": "NZ",
+    "postcode": "6011",
     "needed_quantity": 1,
     "quantity_unit": "item",
     "observed_at": "2026-08-27T12:00:00+12:00"

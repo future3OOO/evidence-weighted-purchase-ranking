@@ -22,6 +22,12 @@ def require_number(value: object, label: str) -> float:
     return float(value)
 
 
+def provenance_warning(
+    path: str, message: str, severity: str = "incomplete"
+) -> dict[str, str]:
+    return {"severity": severity, "path": path, "message": message}
+
+
 def nonzero(value: float) -> float:
     return value if abs(value) >= 1e-300 else 1e-300
 
@@ -144,7 +150,26 @@ def normalized_rating(
 
 def policy_number(policy: dict[str, object], section: str, key: str) -> float:
     values = require_mapping(policy.get(section), f"policy.{section}")
-    return require_number(values.get(key), f"policy.{section}.{key}")
+    number = require_number(values.get(key), f"policy.{section}.{key}")
+    if section in {"product_prior", "seller_prior", "region_multiplier"} and number <= 0:
+        raise ValueError(f"policy.{section}.{key} must be positive")
+    if section == "credible_interval" and not 0 < number < 1:
+        raise ValueError(f"policy.{section}.{key} must be between zero and one")
+    return number
+
+
+def validate_policy(policy: dict[str, object]) -> None:
+    for section in ("product_prior", "seller_prior"):
+        require_mapping(policy.get(section), f"policy.{section}")
+        for key in ("alpha", "beta"):
+            policy_number(policy, section, key)
+    regions = require_mapping(policy.get("region_multiplier"), "policy.region_multiplier")
+    for key in regions:
+        policy_number(policy, "region_multiplier", key)
+    lower = policy_number(policy, "credible_interval", "lower")
+    upper = policy_number(policy, "credible_interval", "upper")
+    if lower >= upper:
+        raise ValueError("policy.credible_interval.lower must be less than upper")
 
 
 def score_product(product_value: object, policy: dict[str, object]) -> dict[str, object]:
@@ -162,13 +187,10 @@ def score_product(product_value: object, policy: dict[str, object]) -> dict[str,
         "probable",
         "ambiguous",
     }:
-        provenance_warnings.append(
-            {
-                "severity": "incomplete",
-                "path": f"products.{product_id}.identity",
-                "message": "identity confidence and identifiers/specification evidence are required",
-            }
-        )
+        provenance_warnings.append(provenance_warning(
+            f"products.{product_id}.identity",
+            "identity confidence and identifiers/specification evidence are required",
+        ))
 
     unique_corpora: dict[str, tuple[float, float, float | None, str, bool]] = {}
     deduplicated_source_ids: list[str] = []
@@ -197,21 +219,15 @@ def score_product(product_value: object, policy: dict[str, object]) -> dict[str,
             }
         )
         if not source.get("url") and not source.get("source_ref"):
-            provenance_warnings.append(
-                {
-                    "severity": "incomplete",
-                    "path": f"products.{product_id}.review_sources.{source_id}.url_or_source_ref",
-                    "message": "review evidence requires a URL or screenshot/file reference",
-                }
-            )
+            provenance_warnings.append(provenance_warning(
+                f"products.{product_id}.review_sources.{source_id}.url_or_source_ref",
+                "review evidence requires a URL or screenshot/file reference",
+            ))
         if not source.get("observed_at"):
-            provenance_warnings.append(
-                {
-                    "severity": "incomplete",
-                    "path": f"products.{product_id}.review_sources.{source_id}.observed_at",
-                    "message": "review evidence requires an observation time",
-                }
-            )
+            provenance_warnings.append(provenance_warning(
+                f"products.{product_id}.review_sources.{source_id}.observed_at",
+                "review evidence requires an observation time",
+            ))
         if source.get("identity_match") != "exact":
             excluded_source_ids.append(source_id)
             continue
@@ -450,22 +466,15 @@ def score_offer(
     cost = require_mapping(offer.get("cost"), f"offer {offer_id}.cost")
     provenance_warnings: list[dict[str, str]] = []
     if not offer.get("url") and not offer.get("source_ref"):
-        provenance_warnings.append(
-            {
-                "severity": "incomplete",
-                "path": f"offers.{offer_id}.url_or_source_ref",
-                "message": "offer requires a URL or screenshot/file reference",
-            }
-        )
+        provenance_warnings.append(provenance_warning(
+            f"offers.{offer_id}.url_or_source_ref",
+            "offer requires a URL or screenshot/file reference",
+        ))
     for field in ("retailer", "fulfilment_origin", "selected_variant"):
         if not isinstance(offer.get(field), str) or not offer.get(field):
-            provenance_warnings.append(
-                {
-                    "severity": "incomplete",
-                    "path": f"offers.{offer_id}.{field}",
-                    "message": f"offer {field} is required",
-                }
-            )
+            provenance_warnings.append(provenance_warning(
+                f"offers.{offer_id}.{field}", f"offer {field} is required",
+            ))
     return {
         "offer_id": offer_id,
         "product_id": product_id,

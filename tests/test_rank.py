@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -32,6 +33,7 @@ class RankingCliTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         template = json.loads(completed.stdout)
         self.assertIn("comparison", template)
+        self.assertEqual(template["comparison"]["postcode"], "6011")
         self.assertIn("products", template)
         self.assertIn("offers", template)
         result = self.run_ranker(template)
@@ -325,6 +327,119 @@ class RankingCliTests(unittest.TestCase):
         result = self.run_ranker(comparison)
         self.assertEqual(result["winner"], "offer-a")
         self.assertEqual(result["status"], "provisional")
+
+    def test_duplicate_product_and_offer_ids_are_rejected(self) -> None:
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+            },
+            "products": [
+                self.rated_product("duplicate", 4.8, 50),
+                self.rated_product("duplicate", 4.6, 20),
+            ],
+            "offers": [self.offer("offer", "duplicate")],
+        }
+        product_result = subprocess.run(
+            [sys.executable, str(RANKER), "--input", "-"],
+            input=json.dumps(comparison),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertNotEqual(product_result.returncode, 0)
+        self.assertIn("product duplicate is duplicated", product_result.stderr)
+
+        comparison["products"] = [self.rated_product("duplicate", 4.8, 50)]
+        comparison["offers"].append(self.offer("offer", "duplicate"))
+        offer_result = subprocess.run(
+            [sys.executable, str(RANKER), "--input", "-"],
+            input=json.dumps(comparison),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertNotEqual(offer_result.returncode, 0)
+        self.assertIn("offer offer is duplicated", offer_result.stderr)
+
+    def test_invalid_policy_ranges_are_rejected_before_scoring(self) -> None:
+        comparison = json.loads(
+            (RANKER.parent / "input-template.json").read_text(encoding="utf-8")
+        )
+        default_policy = json.loads(
+            (RANKER.parent / "default-policy.json").read_text(encoding="utf-8")
+        )
+        cases = [
+            (
+                "inverted-interval",
+                {"credible_interval": {"lower": 0.9, "upper": 0.1}},
+                "policy.credible_interval.lower must be less than upper",
+            ),
+            (
+                "zero-prior",
+                {"product_prior": {"alpha": 0}},
+                "policy.product_prior.alpha must be positive",
+            ),
+            (
+                "null-prior-key",
+                {"product_prior": {"beta": None}},
+                "policy.product_prior.beta must be a number",
+            ),
+            (
+                "zero-region",
+                {"region_multiplier": {"NZ": 0}},
+                "policy.region_multiplier.NZ must be positive",
+            ),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            for name, changes, expected in cases:
+                with self.subTest(name=name):
+                    policy = json.loads(json.dumps(default_policy))
+                    for section, values in changes.items():
+                        policy[section].update(values)
+                    policy_path = Path(directory) / f"{name}.json"
+                    policy_path.write_text(json.dumps(policy), encoding="utf-8")
+                    completed = subprocess.run(
+                        [
+                            sys.executable,
+                            str(RANKER),
+                            "--input",
+                            "-",
+                            "--policy",
+                            str(policy_path),
+                        ],
+                        input=json.dumps(comparison),
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+                    self.assertNotEqual(completed.returncode, 0)
+                    self.assertIn(expected, completed.stderr)
+
+    def test_all_unbounded_offers_have_unknown_break_evens(self) -> None:
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+                "observed_at": "2026-08-27T12:00:00+12:00",
+            },
+            "products": [self.rated_product("same-product", 4.8, 50)],
+            "offers": [
+                self.offer("unknown-a", "same-product", price=10, shipping=None),
+                self.offer("unknown-b", "same-product", price=12, shipping=None),
+            ],
+        }
+
+        result = self.run_ranker(comparison)
+        self.assertEqual(result["status"], "incomplete")
+        self.assertTrue(
+            all(
+                offer["unknown_charge_break_even_nzd"] is None
+                for offer in result["offers"]
+            )
+        )
 
     def test_star_histograms_are_used_and_syndicated_corpora_are_counted_once(self) -> None:
         histogram = {"1": 1, "2": 1, "3": 2, "4": 4, "5": 7}

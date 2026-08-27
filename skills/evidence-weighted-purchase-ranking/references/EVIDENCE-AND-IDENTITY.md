@@ -23,7 +23,7 @@ Generic/unbranded lookalikes are not exact merely because photos match. A store 
 
 ## Corpus gate and deduplication
 
-Every review source needs a stable `corpus_id`. Assign the same corpus ID when sources show the same provider/feed, `Originally posted on` attribution, matching review IDs, or matching author/date/text populations. The scorer keeps the most complete observation of that corpus and reports discarded copies.
+Every review source needs a stable `corpus_id` scoped to one exact product/material variant. Assign the same corpus ID only when exact product identity is already established and the sources also show matching review IDs, `Originally posted on` attribution, or matching author/date/text populations. Provider/feed identity alone is insufficient. The scorer keeps the most complete observation of that corpus and reports discarded copies.
 
 When aggregate overlap cannot be resolved, group the uncertain sources into one conservative corpus and use the most complete aggregate; do not sum them. Pool counts and normalized rating successes only across independent exact-identity corpora.
 

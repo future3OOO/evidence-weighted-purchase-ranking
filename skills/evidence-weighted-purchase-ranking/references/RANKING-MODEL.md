@@ -63,7 +63,7 @@ DecisionCostBest  = region * costLow  / (qualityHigh * sellerHigh * lifeHigh)
 DecisionCostWorst = region * costHigh / (qualityLow  * sellerLow  * lifeLow)
 ```
 
-An unbounded cost cannot be a robust winner. A result is robust only when winner-changing uncertainty is absent and the conservative order remains separated; otherwise report provisional/incomplete plus breakpoints. An exact tie is provisional because the stable ID tie-break selects an order without evidence that one offer is better.
+An unbounded cost sorts after every finite DecisionCost and cannot be a robust winner. If all offers are unbounded, their optimistic bound, landed-cost lower bound, evidence factors, region, support counts, and stable offer ID provide a deterministic display order, but the winner remains `incomplete` and break-even remains unknown. A result is robust only when winner-changing uncertainty is absent and the conservative order remains separated; otherwise report provisional/incomplete plus breakpoints. An exact tie is provisional because the stable ID tie-break selects an order without evidence that one offer is better.
 
 Tie order is: lower DecisionCost, lower exact landed cost, higher ProductFactor, NZ before AU before international, more independent product reviews, more seller feedback, sold/transactions, then stable offer ID. Use full precision for ordering.
 

@@ -7,11 +7,13 @@ from pathlib import Path
 
 from model import (
     offer_identity,
+    provenance_warning,
     require_mapping,
     require_number,
     require_sequence,
     score_offer,
     score_product,
+    validate_policy,
 )
 
 
@@ -29,6 +31,7 @@ def upper_sort_value(value: object) -> float:
 
 
 def rank_comparison(payload: object, policy: dict[str, object]) -> dict[str, object]:
+    validate_policy(policy)
     comparison = require_mapping(payload, "input")
     settings = require_mapping(comparison.get("comparison"), "comparison")
     needed_quantity = require_number(
@@ -42,7 +45,12 @@ def rank_comparison(payload: object, policy: dict[str, object]) -> dict[str, obj
         for value in require_sequence(comparison.get("products"), "products")
     ]
     products.sort(key=lambda product: str(product["product_id"]))
-    product_by_id = {str(product["product_id"]): product for product in products}
+    product_by_id: dict[str, dict[str, object]] = {}
+    for product in products:
+        product_id = str(product["product_id"])
+        if product_id in product_by_id:
+            raise ValueError(f"product {product_id} is duplicated")
+        product_by_id[product_id] = product
     quality_ranking = sorted(
         products,
         key=lambda product: (
@@ -54,9 +62,13 @@ def rank_comparison(payload: object, policy: dict[str, object]) -> dict[str, obj
 
     offers: list[dict[str, object]] = []
     excluded: list[dict[str, str]] = []
+    seen_offer_ids: set[str] = set()
     for offer_value in require_sequence(comparison.get("offers"), "offers"):
         offer = require_mapping(offer_value, "offer")
         offer_id, product_id = offer_identity(offer)
+        if offer_id in seen_offer_ids:
+            raise ValueError(f"offer {offer_id} is duplicated")
+        seen_offer_ids.add(offer_id)
         if product_id not in product_by_id:
             raise ValueError(f"offer {offer_id}.product_id must reference a product")
         product = product_by_id[product_id]
@@ -113,13 +125,9 @@ def rank_comparison(payload: object, policy: dict[str, object]) -> dict[str, obj
         )
     ]
     if not settings.get("observed_at"):
-        provenance_warnings.append(
-            {
-                "severity": "warning",
-                "path": "comparison.observed_at",
-                "message": "comparison observation time is recommended",
-            }
-        )
+        provenance_warnings.append(provenance_warning(
+            "comparison.observed_at", "comparison observation time is recommended", "warning"
+        ))
     if any(
         require_mapping(warning, "provenance warning").get("severity")
         == "incomplete"
@@ -185,7 +193,7 @@ def set_unknown_cost_break_evens(
         return
     winner_decision = winner["decision_cost"]
     if winner_decision is None:
-        winner_decision = winner["decision_cost_best"]
+        return
     winner_cost = require_number(winner_decision, "winner decision cost")
     for offer in offers:
         if not offer["cost_unbounded"]:
@@ -276,6 +284,14 @@ def result_rows(result: dict[str, object], key: str) -> list[dict[str, object]]:
     ]
 
 
+def markdown_row(*values: object) -> str:
+    return "| " + " | ".join(str(value) for value in values) + " |"
+
+
+def start_table(lines: list[str], title: str, header: str, separator: str) -> None:
+    lines.extend(["", f"## {title}", "", header, separator])
+
+
 def cost_uncertainty_line(offer: dict[str, object]) -> str:
     components = ", ".join(
         str(value)
@@ -333,80 +349,53 @@ def render_markdown(result: dict[str, object]) -> str:
         "| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for item in ranking:
-        lines.append(
-            "| {rank} | {offer} | {product} | {region} | {low}-{high} | {useful} | {region_factor} | {quality} | {seller} | {best} | {worst} |".format(
-                rank=item.get("rank"),
-                offer=item.get("offer_id"),
-                product=item.get("product_id"),
-                region=item.get("region"),
-                low=display_number(item.get("landed_cost_low_nzd")),
-                high=display_number(item.get("landed_cost_high_nzd")),
-                useful=display_number(item.get("useful_quantity")),
-                region_factor=display_number(item.get("region_multiplier"), 3),
-                quality=display_number(item.get("product_factor"), 3),
-                seller=display_number(item.get("seller_factor"), 3),
-                best=display_number(item.get("decision_cost_best")),
-                worst=display_number(item.get("decision_cost_worst")),
-            )
-        )
+        lines.append(markdown_row(
+            item.get("rank"), item.get("offer_id"), item.get("product_id"),
+            item.get("region"),
+            f"{display_number(item.get('landed_cost_low_nzd'))}-{display_number(item.get('landed_cost_high_nzd'))}",
+            display_number(item.get("useful_quantity")),
+            display_number(item.get("region_multiplier"), 3),
+            display_number(item.get("product_factor"), 3),
+            display_number(item.get("seller_factor"), 3),
+            display_number(item.get("decision_cost_best")),
+            display_number(item.get("decision_cost_worst")),
+        ))
 
-    lines.extend(
-        [
-            "",
-            "## Offer details",
-            "",
-            "| Offer | Retailer / merchant type | Fulfilment | Selected variant | URL | Currency / FX source / date |",
-            "| --- | --- | --- | --- | --- | --- |",
-        ]
+    start_table(
+        lines, "Offer details",
+        "| Offer | Retailer / merchant type | Fulfilment | Selected variant | URL | Currency / FX source / date |",
+        "| --- | --- | --- | --- | --- | --- |",
     )
     for offer in offers:
-        lines.append(
-            "| {offer} | {retailer} / {merchant} | {origin} | {variant} | {url} | {currency} x {fx} / {source} / {date} |".format(
-                offer=offer.get("offer_id"),
-                retailer=offer.get("retailer"),
-                merchant=offer.get("merchant_type"),
-                origin=offer.get("fulfilment_origin"),
-                variant=offer.get("selected_variant"),
-                url=offer.get("url") or offer.get("source_ref"),
-                currency=offer.get("currency"),
-                fx=offer.get("fx_to_nzd"),
-                source=offer.get("fx_source"),
-                date=offer.get("fx_as_of"),
-            )
-        )
+        lines.append(markdown_row(
+            offer.get("offer_id"),
+            f"{offer.get('retailer')} / {offer.get('merchant_type')}",
+            offer.get("fulfilment_origin"), offer.get("selected_variant"),
+            offer.get("url") or offer.get("source_ref"),
+            f"{offer.get('currency')} x {offer.get('fx_to_nzd')} / {offer.get('fx_source')} / {offer.get('fx_as_of')}",
+        ))
 
-    lines.extend(
-        [
-            "",
-            "## Product evidence",
-            "",
-            "| Rank | Product | Identity | Reviews used | Product factor | Quality low | Quality mean | Quality high | Low-star share |",
-            "| ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
-        ]
+    start_table(
+        lines, "Product evidence",
+        "| Rank | Product | Identity | Reviews used | Product factor | Quality low | Quality mean | Quality high | Low-star share |",
+        "| ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     )
     for product in products:
-        lines.append(
-            "| {rank} | {product} | {identity} | {count} | {factor} | {low} | {mean} | {high} | {share} |".format(
-                rank=quality_rank_by_id[str(product.get("product_id"))],
-                product=product.get("product_id"),
-                identity=json.dumps(product.get("identity"), sort_keys=True),
-                count=display_number(product.get("review_count_used"), 0),
-                factor=display_number(product.get("product_factor"), 3),
-                low=display_number(product.get("quality_low"), 3),
-                mean=display_number(product.get("quality_mean"), 3),
-                high=display_number(product.get("quality_high"), 3),
-                share=display_number(product.get("low_star_share"), 3),
-            )
-        )
+        lines.append(markdown_row(
+            quality_rank_by_id[str(product.get("product_id"))], product.get("product_id"),
+            json.dumps(product.get("identity"), sort_keys=True),
+            display_number(product.get("review_count_used"), 0),
+            display_number(product.get("product_factor"), 3),
+            display_number(product.get("quality_low"), 3),
+            display_number(product.get("quality_mean"), 3),
+            display_number(product.get("quality_high"), 3),
+            display_number(product.get("low_star_share"), 3),
+        ))
 
-    lines.extend(
-        [
-            "",
-            "## Review-source decisions",
-            "",
-            "| Product | Source | Status | Corpus | Identity match | URL | Observed | Labels |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- |",
-        ]
+    start_table(
+        lines, "Review-source decisions",
+        "| Product | Source | Status | Corpus | Identity match | URL | Observed | Labels |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
     )
     for product in products:
         for source_value in require_sequence(
@@ -417,18 +406,12 @@ def render_markdown(result: dict[str, object]) -> str:
                 str(value)
                 for value in require_sequence(source.get("labels"), "source labels")
             )
-            lines.append(
-                "| {product} | {source} | {status} | {corpus} | {identity} | {url} | {observed} | {labels} |".format(
-                    product=product.get("product_id"),
-                    source=source.get("id"),
-                    status=source.get("status"),
-                    corpus=source.get("corpus_id"),
-                    identity=source.get("identity_match"),
-                    url=source.get("url") or source.get("source_ref"),
-                    observed=source.get("observed_at"),
-                    labels=labels,
-                )
-            )
+            lines.append(markdown_row(
+                product.get("product_id"), source.get("id"), source.get("status"),
+                source.get("corpus_id"), source.get("identity_match"),
+                source.get("url") or source.get("source_ref"),
+                source.get("observed_at"), labels,
+            ))
 
     unknown = [offer for offer in offers if offer.get("unknown_cost_components")]
     if unknown:
