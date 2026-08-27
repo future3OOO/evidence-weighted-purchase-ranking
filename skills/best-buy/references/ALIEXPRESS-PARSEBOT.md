@@ -8,7 +8,7 @@ Use `scripts/aliexpress.py` once per comparison. Its single search response is t
 python scripts/aliexpress.py search "curtain cleat hook" --request-marker comparison.aliexpress-request --sort-by best_match
 ```
 
-The marker is consumed before the request, including on failure. Do not delete, replace, or bypass it without explicit user authorization. Do not retry, paginate, wait for rate limits, change the query, or call details/reviews. `PARSE_API_KEY`, `--api-key`, and `--base-url` retain their existing overrides.
+The marker blocks concurrent calls and remains after a successful response; provider failures release it. Do not retry automatically, paginate, wait for rate limits, change the query, or call details/reviews. `PARSE_API_KEY`, `--api-key`, and `--base-url` retain their existing overrides.
 
 ## Single-response contract
 
