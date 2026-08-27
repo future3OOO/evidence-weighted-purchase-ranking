@@ -1,52 +1,19 @@
 # Empirical Calibration
 
-Read this file only when the user has historical marketplace outcomes and wants the default ranking model calibrated. Normal recommendation runs do not need it.
+Read this file only when historical outcomes are available and the user asks to replace versioned defaults. Normal rankings use `scripts/default-policy.json` unchanged.
 
-The runtime defaults in `SKILL.md` are deliberately fixed so an agent can rank candidates from ordinary marketplace evidence without inventing category baselines. Do not call them empirically optimal.
+Define the target first: satisfaction, return/refund, dispute, delivery failure, expected monetary loss, or a user-defined utility. Do not fit to clicks, marketplace position, or sales volume unless popularity itself is the desired outcome.
 
-## Calibration target
+Preserve Product, ReviewCorpus, Offer, and Seller seams. Candidate features may include product rating successes/count, low-star share, seller feedback successes/count, landed cost, region, delivery outcome, returns/warranty, and a comparable service-life measure. Sold/transaction volume remains distinct from satisfaction outcomes.
 
-Define the outcome that "best purchase" means before fitting anything. Useful targets include:
+Use future-held-out and seller/product-held-out validation to prevent repeated products, syndicated corpora, or merchants leaking across train and test. Compare the calibrated model against the unchanged default on the declared outcome. Replace defaults only when out-of-sample utility materially improves and monotone directions remain sensible:
 
-- successful purchase or conversion;
-- refund/return probability;
-- dispute or item-not-as-described probability;
-- delivery failure;
-- post-purchase satisfaction;
-- expected monetary loss;
-- a composite utility explicitly defined by the user.
+- lower landed cost cannot hurt value;
+- stronger above-prior review evidence cannot reduce conservative quality;
+- stronger below-prior review evidence cannot improve conservative quality;
+- sold/transactions alone cannot improve satisfaction quality;
+- missing marketplace-only fields cannot penalize direct retailers;
+- exact duplicate corpora count once;
+- NZ/AU preference remains explicit rather than hidden in product quality.
 
-Do not fit to clicks or marketplace ranking position unless those are genuinely the desired outcomes; they encode platform behaviour rather than purchase quality.
-
-## Preserve the population seams
-
-Keep the raw runtime features separate during fitting:
-
-- product/listing quality;
-- product-review support;
-- listing-sales support;
-- seller quality;
-- seller-feedback support;
-- seller-transaction support;
-- delivered unit cost;
-- any explicitly active product features.
-
-Do not merge listing sales with seller transactions or product reviews with seller feedback before fitting. A learned coefficient cannot repair a population mismatch.
-
-## Fit and validate
-
-Use future-held-out or seller-held-out validation so repeated observations from the same listing/seller do not leak into both train and test sets.
-
-Prefer a monotone model or constraints that preserve sane directions unless the data identifies a separately interpretable adverse signal:
-
-- lower delivered unit cost should not reduce value;
-- higher product quality should not be a penalty;
-- more supporting product evidence should not be a penalty;
-- higher seller quality should not be a penalty;
-- more supporting seller evidence should not be a penalty.
-
-Compare the calibrated model against the unchanged runtime default on the held-out objective. Replace defaults only when the calibrated model materially improves out-of-sample ranking/utility and remains stable across relevant product categories or when a category-specific model is explicitly intended.
-
-## Precision
-
-Do not print extra decimal places merely because a fitted model has floating-point coefficients. Report only the precision justified by held-out stability. The runtime skill intentionally presents scores to one decimal place.
+Version any changed prior, credible interval, regional multiplier, or tie-break policy. Report training population, time range, held-out design, uncertainty, and categories where the model is not validated. Do not print precision unsupported by held-out stability.

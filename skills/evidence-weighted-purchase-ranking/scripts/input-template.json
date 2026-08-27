@@ -1,0 +1,64 @@
+{
+  "comparison": {
+    "destination": "NZ",
+    "needed_quantity": 1,
+    "quantity_unit": "item",
+    "observed_at": "2026-08-27T12:00:00+12:00"
+  },
+  "products": [
+    {
+      "id": "example-product",
+      "name": "Example exact product",
+      "identity": {
+        "confidence": "exact",
+        "brand": "Example",
+        "mpn": "EX-100",
+        "variant": "NZ-compatible"
+      },
+      "hard_fit": true,
+      "review_sources": [
+        {
+          "id": "example-retailer-reviews",
+          "url": "https://example.nz/products/ex-100",
+          "corpus_id": "example-native-ex-100",
+          "identity_match": "exact",
+          "observed_at": "2026-08-27T12:00:00+12:00",
+          "rating": {
+            "mean": 4.7,
+            "scale_min": 1,
+            "scale_max": 5,
+            "count": 15
+          }
+        }
+      ]
+    }
+  ],
+  "offers": [
+    {
+      "id": "example-nz-offer",
+      "product_id": "example-product",
+      "url": "https://example.nz/products/ex-100",
+      "retailer": "Example NZ",
+      "merchant_type": "first_party",
+      "region": "NZ",
+      "fulfilment_origin": "NZ",
+      "selected_variant": "NZ-compatible",
+      "hard_fit": true,
+      "pack_quantity": 1,
+      "packs_purchased": 1,
+      "cost": {
+        "currency": "NZD",
+        "fx_to_nzd": 1,
+        "fx_source": "native NZD",
+        "fx_as_of": "2026-08-27",
+        "components": {
+          "item": {"state": "observed", "amount": 20},
+          "shipping": {"state": "observed", "amount": 5},
+          "tax": {"state": "observed", "amount": 0},
+          "mandatory_fees": {"state": "not_applicable"},
+          "eligible_discount": {"state": "not_applicable"}
+        }
+      }
+    }
+  ]
+}

@@ -1,38 +1,16 @@
 # Evidence-Weighted Purchase Ranking
 
-A reusable Codex skill that **calculates** marketplace purchase rankings from variant-specific delivered value, product/listing evidence, and seller evidence. It is designed to prevent qualitative recommendation drift: the agent must extract inputs, show intermediate scores, rank candidates, and name one winner.
+A Codex skill for deterministic best-buy comparisons across ordinary retailers and marketplaces, designed for a New Zealand shopper. It separates exact-product evidence from retailer offers, handles missing marketplace-only fields without penalising direct retailers, pools deduplicated cross-site reviews only after an identity gate, calculates landed cost-to-need, and applies an explicit NZ/AU preference that overseas bargains can still overcome.
 
 ## Install in Codex
 
-`$skill-installer` is a **Codex skill invocation, not a Bash command**.
-
-From your terminal, start Codex:
-
-```bash
-codex
-```
-
-Then at the Codex prompt enter:
+At a Codex prompt, run:
 
 ```text
 $skill-installer install https://github.com/future3OOO/evidence-weighted-purchase-ranking/tree/main/skills/evidence-weighted-purchase-ranking
 ```
 
-Restart Codex after installation if the new skill is not discovered immediately.
-
-### Direct shell installation
-
-```bash
-set -e
-repo_tmp="$(mktemp -d)"
-dest="${CODEX_HOME:-$HOME/.codex}/skills/evidence-weighted-purchase-ranking"
-test ! -e "$dest" || { echo "Already exists: $dest" >&2; exit 1; }
-git clone --depth 1 https://github.com/future3OOO/evidence-weighted-purchase-ranking.git "$repo_tmp/repo"
-mkdir -p "$(dirname "$dest")"
-cp -a "$repo_tmp/repo/skills/evidence-weighted-purchase-ranking" "$dest"
-rm -rf "$repo_tmp"
-echo "Installed to $dest"
-```
+Restart Codex if the skill is not discovered immediately.
 
 ## Invoke
 
@@ -40,27 +18,48 @@ echo "Installed to $dest"
 $evidence-weighted-purchase-ranking
 ```
 
-The skill is model-invoked as well. Its trigger covers best-value, best-buy, and ranked marketplace comparisons when price/quantity, product rating/reviews/listing sales, or seller reputation evidence are available.
+The skill also triggers for best-value, best-buy, cross-site, and ranked purchase comparisons involving ordinary NZ/AU retailers, Trade Me/eBay/AliExpress-style marketplaces, product reviews, seller evidence, screenshots, or landed pricing.
 
-## Numerical architecture
+## Model 2.0
 
-The runtime skill computes four explicit outputs:
+The previous additive evidence model has been replaced:
 
-1. **ValueScore** — selected-variant delivered unit cost relative to the cheapest hard-fit candidate.
-2. **ListingEvidenceScore** — product rating + product-review count + listing sold count.
-3. **SellerConfidenceScore** — seller-wide quality + seller-feedback count + seller transactions.
-4. **PurchaseScore** — deterministic non-compensatory combination of the active value/evidence axes, preceded by hard-fit and Pareto-dominance checks.
+- review volume tightens a Beta posterior around the observed product rating; it does not award popularity points;
+- sold and transaction counts are informational/tie-break evidence only;
+- first-party retailers have no marketplace seller penalty;
+- exact products can share independent review corpora across offers, while syndicated copies count once;
+- unwanted surplus cannot manufacture unit value;
+- unknown shipping/tax/fees create cost intervals and break-even output, with bounded uncertainty ranked conservatively rather than assigned an invented midpoint;
+- regional preference is a visible offer-layer multiplier: NZ `1.00`, AU `1.10`, international `1.25`;
+- `DecisionCost` is candidate-set independent, so an irrelevant listing cannot rescale existing candidates.
 
-Count evidence uses a fixed diminishing-return transform rather than candidate-set P95 calibration. Missing evidence produces lower/upper score bounds instead of replacing observed ratings with an arbitrary prior.
+The script always reports raw landed price beside its evidence- and region-adjusted ranking.
 
-The skill also requires:
+## Deterministic scorer
 
-- variant-specific quantity and delivered-price verification;
-- explicit separation of listing and seller evidence populations;
-- hard-fit handling for compatibility/safety requirements;
-- a complete scored ranking table before any recommendation;
-- value, listing-evidence, seller-confidence, and overall ranks;
-- dominance and leave-one-axis-out stability checks;
-- explicit identification of missing fields that could change the winner.
+From the skill directory:
 
-See [`SKILL.md`](skills/evidence-weighted-purchase-ranking/SKILL.md) for the runtime calculation and [`MARKETPLACE-FIELDS.md`](skills/evidence-weighted-purchase-ranking/references/MARKETPLACE-FIELDS.md) for marketplace-specific variant, pricing, evidence-scope, safety, and feature rules.
+```text
+python scripts/rank.py --template
+python scripts/rank.py --input comparison.json --format json
+python scripts/rank.py --input comparison.json --format markdown
+```
+
+The scorer uses only the Python standard library. Its normalized JSON boundary is intentionally retailer-agnostic; the browser/agent extracts evidence, and the script validates, aggregates, scores, orders, and explains it.
+
+## Files
+
+- [`SKILL.md`](skills/evidence-weighted-purchase-ranking/SKILL.md): concise runtime workflow and output contract.
+- [`RANKING-MODEL.md`](skills/evidence-weighted-purchase-ranking/references/RANKING-MODEL.md): formulas and interpretation.
+- [`EVIDENCE-AND-IDENTITY.md`](skills/evidence-weighted-purchase-ranking/references/EVIDENCE-AND-IDENTITY.md): exact-product matching and review-corpus deduplication.
+- [`RETAILER-FIELDS.md`](skills/evidence-weighted-purchase-ranking/references/RETAILER-FIELDS.md): adaptive extraction for direct retailers and marketplaces.
+- [`NZ-AU-PURCHASE-POLICY.md`](skills/evidence-weighted-purchase-ranking/references/NZ-AU-PURCHASE-POLICY.md): regional sourcing and landed-cost rules.
+- [`default-policy.json`](skills/evidence-weighted-purchase-ranking/scripts/default-policy.json): versioned executable defaults.
+
+## Verify
+
+```text
+python -m unittest discover -s tests -v
+```
+
+The suite covers adverse rating volume, sparse-review shrinkage, the blind-cleat case, direct versus third-party sellers, cross-site identity, syndicated histograms, hard-fit exclusion, unknown freight, surplus packs, regional hurdles, the input template, and Markdown output.
