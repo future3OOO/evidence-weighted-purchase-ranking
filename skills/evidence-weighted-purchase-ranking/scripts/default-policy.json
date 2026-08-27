@@ -1,0 +1,20 @@
+{
+  "model_version": "2.0.0",
+  "product_prior": {
+    "alpha": 7.5,
+    "beta": 2.5
+  },
+  "seller_prior": {
+    "alpha": 9.0,
+    "beta": 1.0
+  },
+  "credible_interval": {
+    "lower": 0.1,
+    "upper": 0.9
+  },
+  "region_multiplier": {
+    "NZ": 1.0,
+    "AU": 1.1,
+    "international": 1.25
+  }
+}
