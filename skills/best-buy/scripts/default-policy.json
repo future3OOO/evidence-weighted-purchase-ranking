@@ -1,6 +1,6 @@
 {
-  "model_version": "3.0.0",
-  "minimum_exact_reviews_for_value": 5,
+  "model_version": "3.1.0",
+  "minimum_exact_reviews_for_value": 1,
   "minimum_exact_reviews_for_limited": 1,
   "allow_expert_test_as_evidence": true,
   "product_prior": {

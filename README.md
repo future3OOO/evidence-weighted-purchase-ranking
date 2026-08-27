@@ -20,16 +20,16 @@ $best-buy
 
 The skill also triggers for best-value, best-buy, cross-site, and ranked purchase comparisons involving ordinary NZ/AU retailers, Trade Me/eBay/AliExpress-style marketplaces, product reviews, seller evidence, screenshots, or landed pricing.
 
-## Model 3.0
+## Model 3.1
 
 The scorer now separates two questions that must not be conflated:
 
-- **Best price** includes every qualifying offer and ranks resolved landed cost only. An unrated product can win price, but is labelled unverified.
-- **Evidence-backed best value** admits only products with sufficient exact evidence. The default threshold is five known-count exact consumer reviews or one exact independent expert test.
+- **Evidence-adjusted best value** is primary and admits products with at least one known-count exact consumer review or one exact independent expert test.
+- **Best price** is secondary, includes every qualifying offer, and ranks resolved landed cost only. An unrated product can win price but remains unverified.
 
 Every product is labelled `evidence_backed`, `limited_evidence`, `unrated`, or `ambiguous_evidence`. A Bayesian prior still expresses uncertainty, but prior-only products cannot win or lead the value ranking. A value result is called a winner only when it is robust; overlapping intervals produce a provisional leader.
 
-Model 3.0 deliberately changes the output contract: top-level `winner` is now non-null only for a robust evidence-backed value result, and top-level `ranking` contains only evidence-eligible offers. Use `leader` for provisional or cost-incomplete value results, `best_price`/`price_ranking` for the cost-only result, and `unverified_value_contenders` for excluded value candidates. Legacy `raw_landed_*` keys remain as price aliases.
+Model 3.1 makes DecisionCost the first and primary ranking. Top-level `winner` is non-null only for a robust evidence-adjusted value result, and top-level `ranking` contains only evidence-eligible offers. Prior-only products receive no value rank. Use `leader` for provisional or cost-incomplete value results, `best_price`/`price_ranking` for the secondary cost-only result, and `unverified_value_contenders` for unranked value candidates. Legacy `raw_landed_*` keys remain as price aliases.
 
 Other model rules remain:
 
@@ -42,7 +42,7 @@ Other model rules remain:
 - regional preference is a visible offer-layer multiplier: NZ `1.00`, AU `1.10`, international `1.25`;
 - `DecisionCost` is candidate-set independent, so an irrelevant listing cannot rescale existing candidates.
 
-The script always reports the best-price table beside its evidence- and region-adjusted value table, including unverified contenders.
+The Markdown renderer reports evidence-adjusted value first and best price last.
 
 ## Deterministic scorer
 

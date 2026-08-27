@@ -280,6 +280,7 @@ def score_product(product_value: object, policy: dict[str, object]) -> dict[str,
                 "labels": source.get("labels", []),
                 "evidence_type": source.get("evidence_type", "consumer_reviews"),
                 "independent": source.get("independent"),
+                "rating": source.get("rating"),
             }
         )
         if not source.get("url") and not source.get("source_ref"):

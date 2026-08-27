@@ -23,6 +23,17 @@ class RankingCliTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         return json.loads(completed.stdout)
 
+    def run_markdown(self, comparison: dict) -> str:
+        completed = subprocess.run(
+            [sys.executable, str(RANKER), "--input", "-", "--format", "markdown"],
+            input=json.dumps(comparison),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        return completed.stdout
+
     def test_template_is_valid_normalized_input(self) -> None:
         completed = subprocess.run(
             [sys.executable, str(RANKER), "--template"],
@@ -57,20 +68,27 @@ class RankingCliTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertIn("Best-price winner: `example-nz-offer`", completed.stdout)
         self.assertIn(
-            "Evidence-backed value winner: `example-nz-offer`", completed.stdout
+            "Evidence-adjusted value winner: `example-nz-offer`", completed.stdout
         )
-        self.assertIn("## Best price", completed.stdout)
-        self.assertIn("## Evidence-backed best value", completed.stdout)
-        self.assertLess(
-            completed.stdout.index("## Evidence-backed best value"),
-            completed.stdout.index("## Best price"),
+        self.assertIn("## Evidence-adjusted value ranking", completed.stdout)
+        self.assertIn("## Secondary comparison: best price", completed.stdout)
+        headings = [
+            line for line in completed.stdout.splitlines() if line.startswith("## ")
+        ]
+        self.assertEqual(headings[0], "## Evidence-adjusted value ranking")
+        self.assertEqual(headings[-1], "## Secondary comparison: best price")
+        self.assertNotIn(
+            "Best-price winner", completed.stdout.split("## Evidence-adjusted value ranking")[0]
         )
-        self.assertIn("Evidence status", completed.stdout)
-        self.assertIn("Decision cost", completed.stdout)
-        self.assertIn("Best-price status", completed.stdout)
-        self.assertIn("Decision best", completed.stdout)
+        self.assertIn(
+            "| Value rank | Product | Retailer | Landed cost | Rating | Exact reviews | ProductFactor | DecisionCost | DecisionCost interval | Result |",
+            completed.stdout,
+        )
+        self.assertIn(
+            f"{result['ranking'][0]['decision_cost']:.2f}", completed.stdout
+        )
+        self.assertIn("This is not a value or product ranking.", completed.stdout)
         self.assertIn("Review-source decisions", completed.stdout)
         self.assertIn("https://example.nz/products/ex-100", completed.stdout)
         self.assertIn("NZ-compatible", completed.stdout)
@@ -127,7 +145,7 @@ class RankingCliTests(unittest.TestCase):
         self.assertEqual(statuses["cheap-unrated"], "unrated")
         self.assertEqual(statuses["reviewed"], "evidence_backed")
 
-    def test_one_poor_review_is_limited_and_no_value_winner_is_declared(self) -> None:
+    def test_one_exact_review_enters_the_value_ranking(self) -> None:
         comparison = {
             "comparison": {
                 "destination": "NZ",
@@ -135,7 +153,7 @@ class RankingCliTests(unittest.TestCase):
                 "quantity_unit": "item",
             },
             "products": [
-                self.rated_product("one-poor-review", mean=1.0, count=1),
+                self.rated_product("one-review", mean=5.0, count=1),
                 {
                     "id": "unrated",
                     "name": "Unrated product",
@@ -150,7 +168,7 @@ class RankingCliTests(unittest.TestCase):
                 },
             ],
             "offers": [
-                self.offer("poor-offer", "one-poor-review", price=90),
+                self.offer("reviewed-offer", "one-review", price=90),
                 self.offer("unrated-offer", "unrated", price=80),
             ],
         }
@@ -161,21 +179,87 @@ class RankingCliTests(unittest.TestCase):
             product["product_id"]: product["evidence_status"]
             for product in result["products"]
         }
-        self.assertEqual(statuses["one-poor-review"], "limited_evidence")
+        self.assertEqual(statuses["one-review"], "evidence_backed")
         self.assertEqual(statuses["unrated"], "unrated")
         self.assertEqual(result["best_price"]["winner"], "unrated-offer")
-        self.assertEqual(result["evidence_backed_value"]["status"], "incomplete")
-        self.assertIsNone(result["evidence_backed_value"]["winner"])
-        self.assertIsNone(result["evidence_backed_value"]["leader"])
+        self.assertEqual(result["evidence_backed_value"]["status"], "robust")
+        self.assertEqual(result["evidence_backed_value"]["winner"], "reviewed-offer")
+        self.assertEqual(result["evidence_backed_value"]["ranking"], ["reviewed-offer"])
         self.assertEqual(
             result["evidence_backed_value"]["unverified_contenders"],
             [
                 {"offer_id": "unrated-offer", "evidence_status": "unrated"},
-                {"offer_id": "poor-offer", "evidence_status": "limited_evidence"},
             ],
         )
+        self.assertNotIn("rank", result["unverified_value_contenders"][0])
+        markdown = self.run_markdown(comparison)
+        self.assertNotIn("Diagnostic rank", markdown)
+        self.assertNotIn("Rank 2", markdown)
+        self.assertLess(
+            markdown.index("## Unranked products"),
+            markdown.index("## Secondary comparison: best price"),
+        )
 
-    def test_five_exact_reviews_cross_the_default_value_threshold(self) -> None:
+    def test_cooktop_fixture_ranks_every_reviewed_product_by_decision_cost(self) -> None:
+        specs = [
+            ("omega-tz", "Omega OCC64TZTGG", 4.8, 8, 272.8511041330952, 377.196),
+            ("everdure", "Everdure CBEE654T", 4.3, 4, 349.0000454342996, 560.350),
+            ("mistral", "Mistral", 3.0, 1, 298.0, 596.000),
+            ("midea", "Midea MCH640F298K", 4.5, 1, 352.37211437251136, 596.023),
+            ("omega-kz", "Omega OCC64KZTGG", 4.0, 5, 435.7121874563855, 723.217),
+        ]
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "cooktop",
+                "observed_at": "2026-08-27T12:00:00+12:00",
+            },
+            "products": [
+                {**self.rated_product(product_id, rating, count), "name": name}
+                for product_id, name, rating, count, _, _ in specs
+            ],
+            "offers": [
+                self.offer(f"{product_id}-offer", product_id, price=price)
+                for product_id, _, _, _, price, _ in specs
+            ],
+        }
+
+        result = self.run_ranker(comparison)
+
+        self.assertEqual(result["evidence_backed_value"]["status"], "provisional")
+        self.assertIsNone(result["evidence_backed_value"]["winner"])
+        self.assertEqual(result["evidence_backed_value"]["leader"], "omega-tz-offer")
+        self.assertEqual(
+            result["evidence_backed_value"]["ranking"],
+            [f"{product_id}-offer" for product_id, *_ in specs],
+        )
+        self.assertEqual(
+            [round(item["decision_cost"], 3) for item in result["ranking"]],
+            [target for *_, target in specs],
+        )
+        by_offer = {item["offer_id"]: item for item in result["ranking"]}
+        self.assertGreaterEqual(
+            by_offer["omega-tz-offer"]["decision_cost_worst"],
+            by_offer["mistral-offer"]["decision_cost_best"],
+        )
+
+        markdown = self.run_markdown(comparison)
+        self.assertIn("Evidence-adjusted value leader: `omega-tz-offer`", markdown)
+        self.assertIn(
+            "| 1 | Omega OCC64TZTGG | Example | NZ$272.85-272.85 | 4.8/5 | 8 |",
+            markdown,
+        )
+        row_positions = []
+        for rank, (_, name, *_) in enumerate(specs, start=1):
+            row_positions.append(markdown.index(f"| {rank} | {name} |"))
+        self.assertEqual(row_positions, sorted(row_positions))
+        self.assertLess(
+            markdown.index("## Evidence-adjusted value ranking"),
+            markdown.index("## Secondary comparison: best price"),
+        )
+
+    def test_rating_and_count_drive_product_factor_but_price_does_not(self) -> None:
         comparison = {
             "comparison": {
                 "destination": "NZ",
@@ -183,21 +267,47 @@ class RankingCliTests(unittest.TestCase):
                 "quantity_unit": "item",
             },
             "products": [
-                self.rated_product("four-reviews", mean=5.0, count=4),
-                self.rated_product("five-reviews", mean=4.5, count=5),
+                self.rated_product("low-one", mean=1.0, count=1),
+                self.rated_product("high-one", mean=5.0, count=1),
+                self.rated_product("high-five", mean=5.0, count=5),
             ],
             "offers": [
-                self.offer("four-offer", "four-reviews", price=80),
-                self.offer("five-offer", "five-reviews", price=100),
+                self.offer("low-one-offer", "low-one", price=100),
+                self.offer("high-one-offer", "high-one", price=100),
+                self.offer("high-five-offer", "high-five", price=100),
             ],
         }
 
         result = self.run_ranker(comparison)
 
         products = {product["product_id"]: product for product in result["products"]}
-        self.assertEqual(products["four-reviews"]["evidence_status"], "limited_evidence")
-        self.assertEqual(products["five-reviews"]["evidence_status"], "evidence_backed")
-        self.assertEqual(result["evidence_backed_value"]["winner"], "five-offer")
+        self.assertTrue(
+            all(product["evidence_status"] == "evidence_backed" for product in products.values())
+        )
+        self.assertLess(
+            products["low-one"]["product_factor"],
+            products["high-one"]["product_factor"],
+        )
+        self.assertLess(
+            products["high-one"]["product_factor"],
+            products["high-five"]["product_factor"],
+        )
+
+        repriced = json.loads(json.dumps(comparison))
+        for index, offer in enumerate(repriced["offers"], start=1):
+            offer["cost"]["components"]["item"]["amount"] = index * 1000
+        repriced_result = self.run_ranker(repriced)
+        repriced_products = {
+            product["product_id"]: product for product in repriced_result["products"]
+        }
+        self.assertEqual(
+            {key: value["product_factor"] for key, value in products.items()},
+            {key: value["product_factor"] for key, value in repriced_products.items()},
+        )
+        self.assertNotEqual(
+            [offer["decision_cost"] for offer in result["offers"]],
+            [offer["decision_cost"] for offer in repriced_result["offers"]],
+        )
 
     def test_exact_rating_with_unknown_count_is_limited_not_value_eligible(self) -> None:
         product = self.rated_product("unknown-count", mean=4.8, count=1)
@@ -220,7 +330,7 @@ class RankingCliTests(unittest.TestCase):
         self.assertEqual(scored["evidence_status"], "limited_evidence")
         self.assertIsNone(result["evidence_backed_value"]["winner"])
 
-    def test_ambiguous_and_duplicated_reviews_do_not_cross_value_threshold(self) -> None:
+    def test_ambiguous_reviews_do_not_count_and_duplicates_count_once(self) -> None:
         ambiguous = self.rated_product("ambiguous", mean=5.0, count=100)
         ambiguous["review_sources"][0]["identity_match"] = "probable"
         duplicated = self.rated_product("duplicated", mean=5.0, count=1)
@@ -245,9 +355,11 @@ class RankingCliTests(unittest.TestCase):
 
         products = {product["product_id"]: product for product in result["products"]}
         self.assertEqual(products["ambiguous"]["evidence_status"], "ambiguous_evidence")
-        self.assertEqual(products["duplicated"]["evidence_status"], "limited_evidence")
+        self.assertEqual(products["duplicated"]["evidence_status"], "evidence_backed")
         self.assertEqual(products["duplicated"]["exact_consumer_review_count"], 1)
-        self.assertEqual(result["evidence_backed_value"]["status"], "incomplete")
+        self.assertEqual(
+            result["evidence_backed_value"]["ranking"], ["duplicated-offer"]
+        )
 
     def test_independent_exact_expert_test_can_establish_value_eligibility(self) -> None:
         expert_product = self.rated_product("expert-tested", mean=8.5, count=1)
@@ -380,7 +492,7 @@ class RankingCliTests(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("expert_test rating must omit count and histogram", completed.stderr)
 
-    def test_ambiguous_source_does_not_override_limited_exact_evidence(self) -> None:
+    def test_ambiguous_source_does_not_override_exact_evidence(self) -> None:
         product = self.rated_product("mixed-evidence", mean=4.8, count=3)
         product["review_sources"].append(
             {
@@ -408,7 +520,7 @@ class RankingCliTests(unittest.TestCase):
         result = self.run_ranker(comparison)
 
         scored = result["products"][0]
-        self.assertEqual(scored["evidence_status"], "limited_evidence")
+        self.assertEqual(scored["evidence_status"], "evidence_backed")
         self.assertEqual(scored["exact_consumer_review_count"], 3)
         self.assertEqual(scored["excluded_source_ids"], ["ambiguous-family-rating"])
 
@@ -430,9 +542,9 @@ class RankingCliTests(unittest.TestCase):
         )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertIn("Best-price status: `robust`", completed.stdout)
-        self.assertIn("Evidence-backed value leader: `example-nz-offer`", completed.stdout)
-        self.assertIn("| 2 | example-second-offer |", completed.stdout)
+        self.assertIn("Best-price winner: `example-nz-offer`", completed.stdout)
+        self.assertIn("Evidence-adjusted value leader: `example-nz-offer`", completed.stdout)
+        self.assertIn("| 2 | Example exact product |", completed.stdout)
 
     def test_sales_volume_cannot_turn_a_poor_rating_into_quality(self) -> None:
         comparison = {
@@ -1331,7 +1443,7 @@ class RankingCliTests(unittest.TestCase):
         self.assertEqual(
             result["evidence_backed_value"]["ranking"], ["verified-offer"]
         )
-        self.assertEqual(result["unverified_value_contenders"][0]["rank"], 2)
+        self.assertNotIn("rank", result["unverified_value_contenders"][0])
         warning_paths = {warning["path"] for warning in result["provenance_warnings"]}
         self.assertIn(
             "products.unverified.review_sources.ambiguous-reviews.url_or_source_ref",

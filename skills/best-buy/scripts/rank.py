@@ -182,9 +182,7 @@ def rank_comparison(payload: object, policy: dict[str, object]) -> dict[str, obj
             {"rank": index + 1, **offer} for index, offer in enumerate(raw_ranking)
         ],
         "unverified_value_contenders": [
-            {"rank": index + 1, **offer}
-            for index, offer in enumerate(diagnostic_ranking)
-            if not offer["value_eligible"]
+            offer for offer in diagnostic_ranking if not offer["value_eligible"]
         ],
         "raw_landed_ranking": [offer["offer_id"] for offer in raw_ranking],
         "raw_landed_winner": (
@@ -382,10 +380,7 @@ def cost_uncertainty_line(offer: dict[str, object]) -> str:
 
 def render_markdown(result: dict[str, object]) -> str:
     products = result_rows(result, "products")
-    quality_ranking = result_rows(result, "product_quality_ranking")
-    quality_rank_by_id = {
-        str(item["product_id"]): item["rank"] for item in quality_ranking
-    }
+    product_by_id = {str(item["product_id"]): item for item in products}
     offers = result_rows(result, "offers")
     ranking = result_rows(result, "ranking")
     price_ranking = result_rows(result, "price_ranking")
@@ -394,80 +389,86 @@ def render_markdown(result: dict[str, object]) -> str:
     best_value = require_mapping(
         result.get("evidence_backed_value"), "evidence_backed_value"
     )
-    price_winner = best_price.get("winner")
     value_winner = best_value.get("winner")
     value_leader = best_value.get("leader")
+    headline_id = value_winner or value_leader
+    headline_offer = next(
+        (item for item in ranking if item.get("offer_id") == headline_id), None
+    )
     lines = [
         "# Purchase ranking",
         "",
         (
-            f"Evidence-backed value winner: `{value_winner}`"
+            f"Evidence-adjusted value winner: `{value_winner}`"
             if value_winner is not None
-            else f"Evidence-backed value leader: `{value_leader}`"
+            else f"Evidence-adjusted value leader: `{value_leader}`"
             if value_leader is not None
-            else "Evidence-backed best value: incomplete - no eligible product"
+            else "Evidence-adjusted value: incomplete - no eligible product"
         ),
-        f"Evidence-backed value status: `{best_value.get('status')}`",
-        (
-            f"Best-price winner: `{price_winner}`"
-            if price_winner is not None
-            else "Best-price winner: unresolved; leader "
-            f"`{best_price.get('leader')}`"
-            if best_price.get("leader") is not None
-            else "Best price: incomplete - no qualifying offer"
-        ),
-        f"Best-price status: `{best_price.get('status')}`",
+        f"Value status: `{best_value.get('status')}`",
+        f"DecisionCost: {display_number(headline_offer.get('decision_cost')) if headline_offer else 'unknown'}",
         f"Model: `{result.get('model_version')}`",
         "",
-        "## Evidence-backed best value",
+        "## Evidence-adjusted value ranking",
         "",
-        "Only evidence-backed products are eligible. Decision cost is lower-is-better.",
+        "DecisionCost is the lower-is-better best-buy metric. Only reviewed, evidence-eligible products receive a value rank.",
         "",
-        "| Rank | Offer | Product | Region | Landed NZD low-high | Useful qty | Region factor | Product factor | Seller factor | Decision best | Decision worst |",
-        "| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Value rank | Product | Retailer | Landed cost | Rating | Exact reviews | ProductFactor | DecisionCost | DecisionCost interval | Result |",
+        "| ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for item in ranking:
+        product = product_by_id[str(item.get("product_id"))]
+        rating_labels = []
+        for source_value in require_sequence(
+            product.get("review_source_decisions"), "review_source_decisions"
+        ):
+            source = require_mapping(source_value, "review source decision")
+            if source.get("status") != "used":
+                continue
+            rating = require_mapping(source.get("rating"), "review source rating")
+            if rating.get("mean") is not None:
+                mean = require_number(rating.get("mean"), "review source rating.mean")
+                scale_max = require_number(
+                    rating.get("scale_max"), "review source rating.scale_max"
+                )
+                rating_labels.append(f"{mean:g}/{scale_max:g}")
+            else:
+                rating_labels.append("histogram")
+        result_label = (
+            "winner"
+            if item.get("offer_id") == value_winner
+            else f"{best_value.get('status')} leader"
+            if item.get("offer_id") == value_leader
+            else "eligible"
+        )
         lines.append(markdown_row(
-            item.get("rank"), item.get("offer_id"), item.get("product_id"),
-            item.get("region"),
-            f"{display_number(item.get('landed_cost_low_nzd'))}-{display_number(item.get('landed_cost_high_nzd'))}",
-            display_number(item.get("useful_quantity")),
-            display_number(item.get("region_multiplier"), 3),
+            item.get("rank"), product.get("name"), item.get("retailer"),
+            f"NZ${display_number(item.get('landed_cost_low_nzd'))}-{display_number(item.get('landed_cost_high_nzd'))}",
+            "; ".join(rating_labels),
+            display_number(product.get("exact_consumer_review_count"), 0),
             display_number(item.get("product_factor"), 3),
-            display_number(item.get("seller_factor"), 3),
-            display_number(item.get("decision_cost_best")),
-            display_number(item.get("decision_cost_worst")),
+            display_number(item.get("decision_cost")),
+            f"{display_number(item.get('decision_cost_best'))}-{display_number(item.get('decision_cost_worst'))}",
+            result_label,
         ))
 
     if unverified:
-        start_table(
-            lines, "Unverified value contenders",
-            "| Diagnostic rank | Offer | Product | Evidence status | Landed NZD low-high | Product factor |",
-            "| ---: | --- | --- | --- | ---: | ---: |",
-        )
+        lines.extend([
+            "",
+            "## Unranked products",
+            "",
+            "Products without usable exact review evidence are unranked. Prior-only figures are sensitivity diagnostics, not value positions.",
+            "",
+            "| Offer | Product | Evidence status | Prior-only sensitivity |",
+            "| --- | --- | --- | --- |",
+        ])
         for item in unverified:
+            product = product_by_id[str(item.get("product_id"))]
             lines.append(markdown_row(
-                item.get("rank"), item.get("offer_id"), item.get("product_id"),
+                item.get("offer_id"), product.get("name"),
                 item.get("evidence_status"),
-                f"{display_number(item.get('landed_cost_low_nzd'))}-{display_number(item.get('landed_cost_high_nzd'))}",
-                display_number(item.get("product_factor"), 3),
+                f"ProductFactor {display_number(item.get('product_factor'), 3)}; DecisionCost {display_number(item.get('decision_cost'))}",
             ))
-
-    lines.extend([
-        "",
-        "## Best price",
-        "",
-        "Resolved landed cost only; product evidence does not affect this order.",
-        "",
-        "| Rank | Offer | Product | Landed NZD low-high | Evidence status |",
-        "| ---: | --- | --- | ---: | --- |",
-    ])
-    for item in price_ranking:
-        lines.append(markdown_row(
-            item.get("rank"), item.get("offer_id"), item.get("product_id"),
-            f"{display_number(item.get('landed_cost_low_nzd'))}-{display_number(item.get('landed_cost_high_nzd'))}",
-            item.get("evidence_status"),
-        ))
 
     start_table(
         lines, "Offer details",
@@ -485,13 +486,12 @@ def render_markdown(result: dict[str, object]) -> str:
 
     start_table(
         lines, "Product evidence",
-        "| Rank | Product | Evidence status | Identity | Exact consumer reviews | Expert tests | Product factor | Quality low | Quality mean | Quality high | Low-star share |",
-        "| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Product | Evidence status | Identity | Exact consumer reviews | Expert tests | Product factor | Quality low | Quality mean | Quality high | Low-star share |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     )
     for product in products:
         lines.append(markdown_row(
-            quality_rank_by_id[str(product.get("product_id"))], product.get("product_id"),
-            product.get("evidence_status"),
+            product.get("name"), product.get("evidence_status"),
             json.dumps(product.get("identity"), sort_keys=True),
             display_number(product.get("exact_consumer_review_count"), 0),
             display_number(product.get("independent_expert_test_count"), 0),
@@ -504,8 +504,8 @@ def render_markdown(result: dict[str, object]) -> str:
 
     start_table(
         lines, "Review-source decisions",
-        "| Product | Source | Status | Evidence type | Corpus | Identity match | URL | Observed | Labels |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Product | Source | Status | Evidence type | Rating | Corpus | Identity match | URL | Observed | Labels |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     )
     for product in products:
         for source_value in require_sequence(
@@ -519,6 +519,7 @@ def render_markdown(result: dict[str, object]) -> str:
             lines.append(markdown_row(
                 product.get("product_id"), source.get("id"), source.get("status"),
                 source.get("evidence_type"),
+                json.dumps(source.get("rating"), sort_keys=True),
                 source.get("corpus_id"), source.get("identity_match"),
                 source.get("url") or source.get("source_ref"),
                 source.get("observed_at"), labels,
@@ -554,6 +555,30 @@ def render_markdown(result: dict[str, object]) -> str:
                 f"NZ${display_number(alternative.get('landed_premium_nzd'))}.",
             ]
         )
+    price_summary = (
+        f"Best-price winner: `{best_price.get('winner')}`; status: `robust`."
+        if best_price.get("winner") is not None
+        else f"Best-price leader: `{best_price.get('leader')}`; status: `{best_price.get('status')}`."
+        if best_price.get("leader") is not None
+        else "Best price: incomplete - no qualifying offer."
+    )
+    lines.extend([
+        "",
+        "## Secondary comparison: best price",
+        "",
+        "This is not a value or product ranking. It ignores product evidence.",
+        price_summary,
+        "",
+        "| Price rank | Offer | Product | Landed NZD low-high | Evidence status |",
+        "| ---: | --- | --- | ---: | --- |",
+    ])
+    for item in price_ranking:
+        product = product_by_id[str(item.get("product_id"))]
+        lines.append(markdown_row(
+            item.get("rank"), item.get("offer_id"), product.get("name"),
+            f"{display_number(item.get('landed_cost_low_nzd'))}-{display_number(item.get('landed_cost_high_nzd'))}",
+            item.get("evidence_status"),
+        ))
     return "\n".join(lines) + "\n"
 
 

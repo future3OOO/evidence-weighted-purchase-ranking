@@ -1,4 +1,4 @@
-# Deterministic Ranking Model 3.0
+# Deterministic Ranking Model 3.1
 
 `scripts/default-policy.json` is the executable default. `scripts/model.py` is the arithmetic source of truth; `scripts/rank.py` applies comparison ordering and renders the result.
 
@@ -30,7 +30,7 @@ Sanity values: 5.0/6 is about `0.723`, 4.7/15 about `0.761`, 3.0/10,000 about `0
 The executable defaults are:
 
 ```text
-minimum_exact_reviews_for_value = 5
+minimum_exact_reviews_for_value = 1
 minimum_exact_reviews_for_limited = 1
 allow_expert_test_as_evidence = true
 ```
@@ -45,6 +45,8 @@ Each product receives one status:
 - `ambiguous_evidence`: evidence exists but cannot be assigned to the selected product or variant.
 
 The Bayesian prior and diagnostic DecisionCost remain visible for unverified contenders. They do not convert those contenders into evidence-backed value candidates.
+
+A single five-star review qualifies but receives a conservative ProductFactor because uncertainty is high. More reviews at the same strong mean generally raise the lower credible bound. A single poor review also qualifies and can produce a very low ProductFactor. Review count changes confidence continuously; it is never a separate popularity bonus.
 
 ## Seller factor and popularity
 
@@ -68,11 +70,11 @@ Unknown positive charges produce `[costLow,costHigh]`; an absent upper bound yie
 
 ## Separate purchase rankings
 
-### Best price
+### Secondary best price
 
 Best price includes every qualifying offer and orders resolved landed cost only. ProductFactor, SellerFactor, evidence status, sold counts, and regional preference do not change this order. If an unknown charge could change the cheapest offer, the result is `incomplete` and reports a price leader rather than a winner. A robust price winner may still be `unrated`.
 
-### Evidence-backed best value
+### Primary evidence-adjusted best value
 
 Only offers whose product is `evidence_backed` are admitted. With `ServiceLifeFactor = 1` unless credible comparable quantitative life evidence is supplied:
 
