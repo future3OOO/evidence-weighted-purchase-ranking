@@ -19,7 +19,10 @@ def require_sequence(value: object, label: str) -> Sequence[object]:
 def require_number(value: object, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{label} must be a number")
-    return float(value)
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"{label} must be finite")
+    return number
 
 
 def provenance_warning(
@@ -112,11 +115,14 @@ def normalized_rating(
         if not scale_min.is_integer() or not scale_max.is_integer():
             raise ValueError(f"{label} histogram requires an integer rating scale")
         histogram = require_mapping(histogram_value, f"{label}.histogram")
+        expected_buckets = {str(star) for star in range(int(scale_min), int(scale_max) + 1)}
+        if set(histogram) != expected_buckets:
+            raise ValueError(f"{label}.histogram must contain every rating bucket")
         total = 0.0
         weighted = 0.0
         low_count = 0.0
         for star in range(int(scale_min), int(scale_max) + 1):
-            count = require_number(histogram.get(str(star), 0), f"{label}.histogram.{star}")
+            count = require_number(histogram[str(star)], f"{label}.histogram.{star}")
             if count < 0 or not count.is_integer():
                 raise ValueError(f"{label}.histogram counts must be non-negative integers")
             total += count

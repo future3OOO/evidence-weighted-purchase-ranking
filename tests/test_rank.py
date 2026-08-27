@@ -441,6 +441,68 @@ class RankingCliTests(unittest.TestCase):
             )
         )
 
+    def test_nonfinite_numeric_input_is_rejected(self) -> None:
+        comparison = json.loads(
+            (RANKER.parent / "input-template.json").read_text(encoding="utf-8")
+        )
+        comparison["offers"][0]["cost"]["components"]["item"]["amount"] = float("nan")
+
+        completed = subprocess.run(
+            [sys.executable, str(RANKER), "--input", "-"],
+            input=json.dumps(comparison),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("must be finite", completed.stderr)
+
+    def test_rating_histogram_requires_every_scale_bucket(self) -> None:
+        product = self.rated_product("incomplete-histogram", 5.0, 100)
+        product["review_sources"][0]["rating"] = {
+            "scale_min": 1,
+            "scale_max": 5,
+            "histogram": {"5": 100},
+        }
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+            },
+            "products": [product],
+            "offers": [self.offer("offer", "incomplete-histogram")],
+        }
+
+        completed = subprocess.run(
+            [sys.executable, str(RANKER), "--input", "-"],
+            input=json.dumps(comparison),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("histogram must contain every rating bucket", completed.stderr)
+
+    def test_markdown_escapes_dynamic_table_delimiters_and_line_breaks(self) -> None:
+        comparison = json.loads(
+            (RANKER.parent / "input-template.json").read_text(encoding="utf-8")
+        )
+        comparison["offers"][0]["retailer"] = "Retailer | Outlet\nNZ"
+
+        completed = subprocess.run(
+            [sys.executable, str(RANKER), "--input", "-", "--format", "markdown"],
+            input=json.dumps(comparison),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("Retailer \\| Outlet<br>NZ", completed.stdout)
+
     def test_star_histograms_are_used_and_syndicated_corpora_are_counted_once(self) -> None:
         histogram = {"1": 1, "2": 1, "3": 2, "4": 4, "5": 7}
         comparison = {
