@@ -490,7 +490,7 @@ class RankingCliTests(unittest.TestCase):
         comparison = json.loads(
             (RANKER.parent / "input-template.json").read_text(encoding="utf-8")
         )
-        comparison["offers"][0]["retailer"] = "Retailer | Outlet\nNZ"
+        comparison["offers"][0]["retailer"] = "Retailer \\ Branch | Outlet\nNZ"
 
         completed = subprocess.run(
             [sys.executable, str(RANKER), "--input", "-", "--format", "markdown"],
@@ -501,7 +501,7 @@ class RankingCliTests(unittest.TestCase):
         )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertIn("Retailer \\| Outlet<br>NZ", completed.stdout)
+        self.assertIn("Retailer \\\\ Branch \\| Outlet<br>NZ", completed.stdout)
 
     def test_star_histograms_are_used_and_syndicated_corpora_are_counted_once(self) -> None:
         histogram = {"1": 1, "2": 1, "3": 2, "4": 4, "5": 7}

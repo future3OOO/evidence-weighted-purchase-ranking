@@ -286,7 +286,7 @@ def result_rows(result: dict[str, object], key: str) -> list[dict[str, object]]:
 
 def markdown_row(*values: object) -> str:
     return "| " + " | ".join(
-        str(value).replace("|", "\\|").replace("\r\n", "<br>").replace("\n", "<br>").replace("\r", "<br>")
+        str(value).replace("\\", "\\\\").replace("|", "\\|").replace("\r\n", "<br>").replace("\n", "<br>").replace("\r", "<br>")
         for value in values
     ) + " |"
 
