@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 REPO = Path(__file__).resolve().parents[1]
-RANKER = REPO / "skills" / "evidence-weighted-purchase-ranking" / "scripts" / "rank.py"
+RANKER = REPO / "skills" / "best-buy" / "scripts" / "rank.py"
 
 
 class RankingCliTests(unittest.TestCase):
@@ -57,14 +57,360 @@ class RankingCliTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertIn("Winner: `example-nz-offer`", completed.stdout)
+        self.assertIn("Best-price winner: `example-nz-offer`", completed.stdout)
+        self.assertIn(
+            "Evidence-backed value winner: `example-nz-offer`", completed.stdout
+        )
+        self.assertIn("## Best price", completed.stdout)
+        self.assertIn("## Evidence-backed best value", completed.stdout)
+        self.assertLess(
+            completed.stdout.index("## Evidence-backed best value"),
+            completed.stdout.index("## Best price"),
+        )
+        self.assertIn("Evidence status", completed.stdout)
         self.assertIn("Decision cost", completed.stdout)
-        self.assertIn("Raw landed-cost status", completed.stdout)
+        self.assertIn("Best-price status", completed.stdout)
         self.assertIn("Decision best", completed.stdout)
         self.assertIn("Review-source decisions", completed.stdout)
         self.assertIn("https://example.nz/products/ex-100", completed.stdout)
         self.assertIn("NZ-compatible", completed.stdout)
         self.assertIn(f"{result['products'][0]['product_factor']:.3f}", completed.stdout)
+
+    def test_unrated_lowest_price_cannot_win_evidence_backed_value(self) -> None:
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+            },
+            "products": [
+                {
+                    "id": "cheap-unrated",
+                    "name": "Cheap unrated product",
+                    "identity": {
+                        "confidence": "exact",
+                        "brand": "Example",
+                        "mpn": "CHEAP-100",
+                        "variant": "standard",
+                    },
+                    "hard_fit": True,
+                    "review_sources": [],
+                },
+                self.rated_product("reviewed", mean=4.5, count=5),
+            ],
+            "offers": [
+                self.offer("cheap-offer", "cheap-unrated", price=100),
+                self.offer("reviewed-offer", "reviewed", price=150),
+            ],
+        }
+
+        result = self.run_ranker(comparison)
+
+        self.assertEqual(result["best_price"]["winner"], "cheap-offer")
+        self.assertEqual(
+            result["evidence_backed_value"]["winner"], "reviewed-offer"
+        )
+        self.assertEqual(result["evidence_backed_value"]["status"], "robust")
+        self.assertEqual(
+            result["evidence_backed_value"]["ranking"], ["reviewed-offer"]
+        )
+        self.assertEqual(
+            [offer["offer_id"] for offer in result["ranking"]], ["reviewed-offer"]
+        )
+        self.assertEqual(
+            result["best_price"]["ranking"], ["cheap-offer", "reviewed-offer"]
+        )
+        statuses = {
+            product["product_id"]: product["evidence_status"]
+            for product in result["products"]
+        }
+        self.assertEqual(statuses["cheap-unrated"], "unrated")
+        self.assertEqual(statuses["reviewed"], "evidence_backed")
+
+    def test_one_poor_review_is_limited_and_no_value_winner_is_declared(self) -> None:
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+            },
+            "products": [
+                self.rated_product("one-poor-review", mean=1.0, count=1),
+                {
+                    "id": "unrated",
+                    "name": "Unrated product",
+                    "identity": {
+                        "confidence": "exact",
+                        "brand": "Example",
+                        "mpn": "UNRATED",
+                        "variant": "standard",
+                    },
+                    "hard_fit": True,
+                    "review_sources": [],
+                },
+            ],
+            "offers": [
+                self.offer("poor-offer", "one-poor-review", price=90),
+                self.offer("unrated-offer", "unrated", price=80),
+            ],
+        }
+
+        result = self.run_ranker(comparison)
+
+        statuses = {
+            product["product_id"]: product["evidence_status"]
+            for product in result["products"]
+        }
+        self.assertEqual(statuses["one-poor-review"], "limited_evidence")
+        self.assertEqual(statuses["unrated"], "unrated")
+        self.assertEqual(result["best_price"]["winner"], "unrated-offer")
+        self.assertEqual(result["evidence_backed_value"]["status"], "incomplete")
+        self.assertIsNone(result["evidence_backed_value"]["winner"])
+        self.assertIsNone(result["evidence_backed_value"]["leader"])
+        self.assertEqual(
+            result["evidence_backed_value"]["unverified_contenders"],
+            [
+                {"offer_id": "unrated-offer", "evidence_status": "unrated"},
+                {"offer_id": "poor-offer", "evidence_status": "limited_evidence"},
+            ],
+        )
+
+    def test_five_exact_reviews_cross_the_default_value_threshold(self) -> None:
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+            },
+            "products": [
+                self.rated_product("four-reviews", mean=5.0, count=4),
+                self.rated_product("five-reviews", mean=4.5, count=5),
+            ],
+            "offers": [
+                self.offer("four-offer", "four-reviews", price=80),
+                self.offer("five-offer", "five-reviews", price=100),
+            ],
+        }
+
+        result = self.run_ranker(comparison)
+
+        products = {product["product_id"]: product for product in result["products"]}
+        self.assertEqual(products["four-reviews"]["evidence_status"], "limited_evidence")
+        self.assertEqual(products["five-reviews"]["evidence_status"], "evidence_backed")
+        self.assertEqual(result["evidence_backed_value"]["winner"], "five-offer")
+
+    def test_exact_rating_with_unknown_count_is_limited_not_value_eligible(self) -> None:
+        product = self.rated_product("unknown-count", mean=4.8, count=1)
+        del product["review_sources"][0]["rating"]["count"]
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+            },
+            "products": [product],
+            "offers": [self.offer("unknown-count-offer", "unknown-count")],
+        }
+
+        result = self.run_ranker(comparison)
+
+        scored = result["products"][0]
+        self.assertTrue(scored["count_uncertain"])
+        self.assertEqual(scored["exact_consumer_review_count"], 0)
+        self.assertEqual(scored["evidence_status"], "limited_evidence")
+        self.assertIsNone(result["evidence_backed_value"]["winner"])
+
+    def test_ambiguous_and_duplicated_reviews_do_not_cross_value_threshold(self) -> None:
+        ambiguous = self.rated_product("ambiguous", mean=5.0, count=100)
+        ambiguous["review_sources"][0]["identity_match"] = "probable"
+        duplicated = self.rated_product("duplicated", mean=5.0, count=1)
+        original = duplicated["review_sources"][0]
+        duplicated["review_sources"] = [
+            {**original, "id": f"duplicate-{index}"} for index in range(5)
+        ]
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+            },
+            "products": [ambiguous, duplicated],
+            "offers": [
+                self.offer("ambiguous-offer", "ambiguous", price=80),
+                self.offer("duplicated-offer", "duplicated", price=90),
+            ],
+        }
+
+        result = self.run_ranker(comparison)
+
+        products = {product["product_id"]: product for product in result["products"]}
+        self.assertEqual(products["ambiguous"]["evidence_status"], "ambiguous_evidence")
+        self.assertEqual(products["duplicated"]["evidence_status"], "limited_evidence")
+        self.assertEqual(products["duplicated"]["exact_consumer_review_count"], 1)
+        self.assertEqual(result["evidence_backed_value"]["status"], "incomplete")
+
+    def test_independent_exact_expert_test_can_establish_value_eligibility(self) -> None:
+        expert_product = self.rated_product("expert-tested", mean=8.5, count=1)
+        expert_source = expert_product["review_sources"][0]
+        expert_source["rating"] = {
+            "mean": 8.5,
+            "scale_min": 0,
+            "scale_max": 10,
+        }
+        expert_source["evidence_type"] = "expert_test"
+        expert_source["independent"] = True
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+            },
+            "products": [expert_product],
+            "offers": [self.offer("expert-offer", "expert-tested", price=120)],
+        }
+
+        result = self.run_ranker(comparison)
+
+        product = result["products"][0]
+        self.assertEqual(product["evidence_status"], "evidence_backed")
+        self.assertEqual(product["exact_consumer_review_count"], 0)
+        self.assertEqual(product["independent_expert_test_count"], 1)
+        self.assertEqual(result["evidence_backed_value"]["winner"], "expert-offer")
+
+    def test_policy_can_disable_expert_test_value_eligibility(self) -> None:
+        expert_product = self.rated_product("expert-tested", mean=8.5, count=1)
+        expert_source = expert_product["review_sources"][0]
+        expert_source["rating"] = {
+            "mean": 8.5,
+            "scale_min": 0,
+            "scale_max": 10,
+        }
+        expert_source["evidence_type"] = "expert_test"
+        expert_source["independent"] = True
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+            },
+            "products": [expert_product],
+            "offers": [self.offer("expert-offer", "expert-tested")],
+        }
+        policy = json.loads(
+            (RANKER.parent / "default-policy.json").read_text(encoding="utf-8")
+        )
+        policy["allow_expert_test_as_evidence"] = False
+
+        with tempfile.TemporaryDirectory() as directory:
+            policy_path = Path(directory) / "policy.json"
+            policy_path.write_text(json.dumps(policy), encoding="utf-8")
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(RANKER),
+                    "--input",
+                    "-",
+                    "--policy",
+                    str(policy_path),
+                ],
+                input=json.dumps(comparison),
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["products"][0]["evidence_status"], "limited_evidence")
+        self.assertIsNone(result["evidence_backed_value"]["winner"])
+
+    def test_dependent_expert_test_is_not_mislabeled_as_ambiguous(self) -> None:
+        product = self.rated_product("dependent-test", mean=8.5, count=1)
+        source = product["review_sources"][0]
+        source["rating"] = {"mean": 8.5, "scale_min": 0, "scale_max": 10}
+        source["evidence_type"] = "expert_test"
+        source["independent"] = False
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+            },
+            "products": [product],
+            "offers": [self.offer("dependent-offer", "dependent-test")],
+        }
+
+        result = self.run_ranker(comparison)
+
+        self.assertEqual(result["products"][0]["evidence_status"], "unrated")
+        self.assertEqual(
+            result["products"][0]["excluded_source_ids"],
+            ["dependent-test-reviews"],
+        )
+
+    def test_expert_source_must_omit_consumer_review_count(self) -> None:
+        product = self.rated_product("expert-tested", mean=8.5, count=1)
+        source = product["review_sources"][0]
+        source["rating"] = {
+            "mean": 8.5,
+            "scale_min": 0,
+            "scale_max": 10,
+            "count": 1,
+        }
+        source["evidence_type"] = "expert_test"
+        source["independent"] = True
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+            },
+            "products": [product],
+            "offers": [self.offer("expert-offer", "expert-tested")],
+        }
+
+        completed = subprocess.run(
+            [sys.executable, str(RANKER), "--input", "-"],
+            input=json.dumps(comparison),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("expert_test rating must omit count and histogram", completed.stderr)
+
+    def test_ambiguous_source_does_not_override_limited_exact_evidence(self) -> None:
+        product = self.rated_product("mixed-evidence", mean=4.8, count=3)
+        product["review_sources"].append(
+            {
+                "id": "ambiguous-family-rating",
+                "corpus_id": "other-variant",
+                "identity_match": "ambiguous",
+                "rating": {
+                    "mean": 5.0,
+                    "scale_min": 1,
+                    "scale_max": 5,
+                    "count": 500,
+                },
+            }
+        )
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+            },
+            "products": [product],
+            "offers": [self.offer("mixed-offer", "mixed-evidence")],
+        }
+
+        result = self.run_ranker(comparison)
+
+        scored = result["products"][0]
+        self.assertEqual(scored["evidence_status"], "limited_evidence")
+        self.assertEqual(scored["exact_consumer_review_count"], 3)
+        self.assertEqual(scored["excluded_source_ids"], ["ambiguous-family-rating"])
 
     def test_two_offer_markdown_is_safe_on_windows_cp1252(self) -> None:
         comparison = json.loads(
@@ -84,9 +430,9 @@ class RankingCliTests(unittest.TestCase):
         )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertIn(
-            "`example-nz-offer` -> `example-second-offer`", completed.stdout
-        )
+        self.assertIn("Best-price status: `robust`", completed.stdout)
+        self.assertIn("Evidence-backed value leader: `example-nz-offer`", completed.stdout)
+        self.assertIn("| 2 | example-second-offer |", completed.stdout)
 
     def test_sales_volume_cannot_turn_a_poor_rating_into_quality(self) -> None:
         comparison = {
@@ -186,14 +532,7 @@ class RankingCliTests(unittest.TestCase):
                 "needed_quantity": 1,
                 "quantity_unit": "item",
             },
-            "products": [
-                {
-                    "id": "same-product",
-                    "name": "Same exact product",
-                    "hard_fit": True,
-                    "review_sources": [],
-                }
-            ],
+            "products": [self.rated_product("same-product", 4.8, 20)],
             "offers": [
                 self.offer("nz-100", "same-product", price=100, region="NZ"),
                 self.offer("international-85", "same-product", price=85, region="international"),
@@ -246,14 +585,7 @@ class RankingCliTests(unittest.TestCase):
                 "needed_quantity": 1,
                 "quantity_unit": "item",
             },
-            "products": [
-                {
-                    "id": "same-product",
-                    "name": "Same exact product",
-                    "hard_fit": True,
-                    "review_sources": [],
-                }
-            ],
+            "products": [self.rated_product("same-product", 4.8, 20)],
             "offers": [
                 self.offer("known-delivered", "same-product", price=20),
                 self.offer("unknown-freight", "same-product", price=10, shipping=None),
@@ -263,11 +595,16 @@ class RankingCliTests(unittest.TestCase):
         result = self.run_ranker(comparison)
         offers = {offer["offer_id"]: offer for offer in result["offers"]}
         self.assertEqual(result["status"], "incomplete")
-        self.assertEqual(result["winner"], "known-delivered")
+        self.assertIsNone(result["winner"])
+        self.assertEqual(result["leader"], "known-delivered")
         self.assertIsNone(result["raw_landed_winner"])
         self.assertEqual(result["raw_landed_status"], "incomplete")
         self.assertEqual(result["raw_landed_leader"], "known-delivered")
         self.assertEqual(result["raw_landed_contenders"], ["unknown-freight"])
+        self.assertEqual(result["best_price"]["status"], "incomplete")
+        self.assertIsNone(result["best_price"]["winner"])
+        self.assertEqual(result["best_price"]["leader"], "known-delivered")
+        self.assertEqual(result["best_price"]["contenders"], ["unknown-freight"])
         self.assertIsNone(offers["unknown-freight"]["landed_cost_high_nzd"])
         self.assertAlmostEqual(
             offers["unknown-freight"]["unknown_charge_break_even_nzd"], 10.0
@@ -293,6 +630,12 @@ class RankingCliTests(unittest.TestCase):
 
         result = self.run_ranker(comparison)
         scored = result["offers"][0]
+        self.assertEqual(result["status"], "provisional")
+        self.assertIsNone(result["winner"])
+        self.assertEqual(result["leader"], "bounded-shipping")
+        self.assertEqual(result["best_price"]["status"], "incomplete")
+        self.assertIsNone(result["best_price"]["winner"])
+        self.assertEqual(result["best_price"]["leader"], "bounded-shipping")
         self.assertEqual(scored["landed_cost_low_nzd"], 15.0)
         self.assertEqual(scored["landed_cost_high_nzd"], 25.0)
         self.assertNotIn("landed_cost_nzd", scored)
@@ -308,6 +651,33 @@ class RankingCliTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("landed range NZ$15.00-NZ$25.00", completed.stdout)
         self.assertNotIn("break-even NZ$unknown", completed.stdout)
+
+    def test_bounded_rival_can_make_resolved_best_price_incomplete(self) -> None:
+        bounded = self.offer("bounded-rival", "same-product", price=10)
+        bounded["cost"]["components"]["shipping"] = {
+            "state": "ambiguous",
+            "lower_amount": 0,
+            "upper_amount": 20,
+        }
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+            },
+            "products": [self.rated_product("same-product", 4.8, 20)],
+            "offers": [
+                self.offer("resolved-leader", "same-product", price=20),
+                bounded,
+            ],
+        }
+
+        result = self.run_ranker(comparison)
+
+        self.assertEqual(result["best_price"]["status"], "incomplete")
+        self.assertIsNone(result["best_price"]["winner"])
+        self.assertEqual(result["best_price"]["leader"], "resolved-leader")
+        self.assertEqual(result["best_price"]["contenders"], ["bounded-rival"])
 
     def test_exact_offer_tie_is_explicitly_provisional(self) -> None:
         comparison = {
@@ -325,7 +695,10 @@ class RankingCliTests(unittest.TestCase):
         }
 
         result = self.run_ranker(comparison)
-        self.assertEqual(result["winner"], "offer-a")
+        self.assertIsNone(result["winner"])
+        self.assertEqual(result["leader"], "offer-a")
+        self.assertIsNone(result["evidence_backed_value"]["winner"])
+        self.assertEqual(result["evidence_backed_value"]["leader"], "offer-a")
         self.assertEqual(result["status"], "provisional")
 
     def test_duplicate_product_and_offer_ids_are_rejected(self) -> None:
@@ -416,6 +789,47 @@ class RankingCliTests(unittest.TestCase):
                     )
                     self.assertNotEqual(completed.returncode, 0)
                     self.assertIn(expected, completed.stderr)
+
+    def test_value_review_threshold_is_configurable(self) -> None:
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+            },
+            "products": [self.rated_product("five-reviews", 4.8, 5)],
+            "offers": [self.offer("five-offer", "five-reviews")],
+        }
+        policy = json.loads(
+            (RANKER.parent / "default-policy.json").read_text(encoding="utf-8")
+        )
+        policy["minimum_exact_reviews_for_value"] = 6
+
+        with tempfile.TemporaryDirectory() as directory:
+            policy_path = Path(directory) / "policy.json"
+            policy_path.write_text(json.dumps(policy), encoding="utf-8")
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(RANKER),
+                    "--input",
+                    "-",
+                    "--policy",
+                    str(policy_path),
+                ],
+                input=json.dumps(comparison),
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["products"][0]["evidence_status"], "limited_evidence")
+        self.assertEqual(result["evidence_backed_value"]["status"], "incomplete")
+        self.assertIsNone(result["evidence_backed_value"]["winner"])
+        self.assertIsNone(result["evidence_backed_value"]["leader"])
+        self.assertEqual(result["evidence_backed_value"]["ranking"], [])
 
     def test_all_unbounded_offers_have_unknown_break_evens(self) -> None:
         comparison = {
@@ -549,6 +963,47 @@ class RankingCliTests(unittest.TestCase):
         self.assertAlmostEqual(product["low_star_share"], 2 / 15)
         self.assertEqual(product["deduplicated_source_ids"], ["retailer-b-syndicated-copy"])
 
+    def test_expert_test_does_not_erase_consumer_low_star_share(self) -> None:
+        product = self.rated_product("mixed-evidence", 4.5, 10)
+        product["review_sources"] = [
+            {
+                "id": "consumer-histogram",
+                "corpus_id": "consumer-corpus",
+                "identity_match": "exact",
+                "evidence_type": "consumer_reviews",
+                "url": "https://example.nz/mixed-evidence",
+                "observed_at": "2026-08-27T12:00:00+12:00",
+                "rating": {
+                    "scale_min": 1,
+                    "scale_max": 5,
+                    "histogram": {"1": 1, "2": 1, "3": 1, "4": 2, "5": 5},
+                },
+            },
+            {
+                "id": "independent-expert",
+                "corpus_id": "expert-corpus",
+                "identity_match": "exact",
+                "evidence_type": "expert_test",
+                "independent": True,
+                "url": "https://expert.example/mixed-evidence",
+                "observed_at": "2026-08-27T12:00:00+12:00",
+                "rating": {"mean": 4.5, "scale_min": 1, "scale_max": 5},
+            },
+        ]
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+            },
+            "products": [product],
+            "offers": [self.offer("mixed-offer", "mixed-evidence")],
+        }
+
+        result = self.run_ranker(comparison)
+
+        self.assertAlmostEqual(result["products"][0]["low_star_share"], 0.2)
+
     def test_hard_fit_failure_is_excluded_before_ranking(self) -> None:
         comparison = {
             "comparison": {
@@ -575,12 +1030,47 @@ class RankingCliTests(unittest.TestCase):
         }
 
         result = self.run_ranker(comparison)
-        self.assertEqual(result["winner"], "valid")
+        self.assertEqual(result["best_price"]["winner"], "valid")
+        self.assertIsNone(result["evidence_backed_value"]["winner"])
         self.assertNotIn("wrong-voltage", {offer["offer_id"] for offer in result["offers"]})
         self.assertEqual(
             result["excluded"],
             [{"offer_id": "wrong-voltage", "reason": "Wrong voltage for New Zealand"}],
         )
+
+    def test_all_excluded_offers_leave_best_price_incomplete(self) -> None:
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+            },
+            "products": [self.rated_product("unsafe-product", 4.8, 10)],
+            "offers": [
+                {
+                    **self.offer("unsafe-offer", "unsafe-product", price=1),
+                    "hard_fit": False,
+                    "hard_fit_reason": "Unsafe for the required use",
+                }
+            ],
+        }
+
+        result = self.run_ranker(comparison)
+
+        self.assertEqual(result["best_price"]["status"], "incomplete")
+        self.assertIsNone(result["best_price"]["winner"])
+        self.assertIsNone(result["best_price"]["leader"])
+        self.assertEqual(result["best_price"]["ranking"], [])
+        completed = subprocess.run(
+            [sys.executable, str(RANKER), "--input", "-", "--format", "markdown"],
+            input=json.dumps(comparison),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("Best price: incomplete - no qualifying offer", completed.stdout)
+        self.assertNotIn("`None`", completed.stdout)
 
     def test_cleat_evidence_and_purchase_ranks_are_separate(self) -> None:
         comparison = {
@@ -644,7 +1134,8 @@ class RankingCliTests(unittest.TestCase):
 
         result = self.run_ranker(comparison)
         offers = {offer["offer_id"]: offer for offer in result["offers"]}
-        self.assertEqual(result["winner"], "one-for-three")
+        self.assertEqual(result["best_price"]["winner"], "one-for-three")
+        self.assertIsNone(result["evidence_backed_value"]["winner"])
         self.assertEqual(offers["hundred-for-fifty"]["surplus_quantity"], 99)
         self.assertEqual(offers["hundred-for-fifty"]["useful_quantity"], 1)
 
@@ -677,6 +1168,7 @@ class RankingCliTests(unittest.TestCase):
         scored = result["products"][0]
         self.assertEqual(scored["review_count_used"], 10)
         self.assertEqual(scored["excluded_source_ids"], ["lookalike-model-b"])
+        self.assertEqual(scored["evidence_status"], "evidence_backed")
 
     def test_overlapping_product_intervals_make_the_winner_provisional(self) -> None:
         comparison = {
@@ -697,6 +1189,33 @@ class RankingCliTests(unittest.TestCase):
 
         result = self.run_ranker(comparison)
         self.assertEqual(result["status"], "provisional")
+        self.assertIsNone(result["evidence_backed_value"]["winner"])
+        self.assertEqual(
+            result["evidence_backed_value"]["leader"], "model-b-offer"
+        )
+        self.assertEqual(
+            result["evidence_backed_value"]["ranking"],
+            ["model-b-offer", "model-a-offer"],
+        )
+
+    def test_non_exact_product_identity_cannot_produce_a_robust_value_winner(self) -> None:
+        product = self.rated_product("probable-product", 4.9, 20)
+        product["identity"]["confidence"] = "probable"
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+            },
+            "products": [product],
+            "offers": [self.offer("probable-offer", "probable-product", price=100)],
+        }
+
+        result = self.run_ranker(comparison)
+
+        self.assertEqual(result["evidence_backed_value"]["status"], "provisional")
+        self.assertIsNone(result["evidence_backed_value"]["winner"])
+        self.assertEqual(result["evidence_backed_value"]["leader"], "probable-offer")
 
     def test_foreign_currency_requires_an_explicit_rate_source_and_date(self) -> None:
         comparison = {
@@ -730,7 +1249,9 @@ class RankingCliTests(unittest.TestCase):
 
         cost["fx_source"] = "Reserve Bank reference rate"
         cost["fx_as_of"] = "2026-08-27"
-        self.assertEqual(self.run_ranker(comparison)["winner"], "aud-offer")
+        self.assertEqual(
+            self.run_ranker(comparison)["best_price"]["winner"], "aud-offer"
+        )
 
     def test_sold_counts_and_irrelevant_candidates_do_not_rescale_scores(self) -> None:
         comparison = {
@@ -764,6 +1285,59 @@ class RankingCliTests(unittest.TestCase):
         }
         self.assertEqual(reranked_scores["offer-a"], baseline_scores["offer-a"])
         self.assertEqual(reranked_scores["offer-b"], baseline_scores["offer-b"])
+
+    def test_ineligible_provenance_warnings_do_not_erase_value_winner(self) -> None:
+        unverified = {
+            "id": "unverified",
+            "name": "Unverified product",
+            "identity": {
+                "confidence": "exact",
+                "brand": "Example",
+                "mpn": "UNVERIFIED",
+                "variant": "standard",
+            },
+            "hard_fit": True,
+            "review_sources": [
+                {
+                    "id": "ambiguous-reviews",
+                    "corpus_id": "ambiguous-corpus",
+                    "identity_match": "ambiguous",
+                    "rating": {
+                        "mean": 5.0,
+                        "scale_min": 1,
+                        "scale_max": 5,
+                        "count": 100,
+                    },
+                }
+            ],
+        }
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+            },
+            "products": [self.rated_product("verified", 4.8, 10), unverified],
+            "offers": [
+                self.offer("verified-offer", "verified", price=10),
+                {**self.offer("unverified-offer", "unverified", price=100), "url": None},
+            ],
+        }
+
+        result = self.run_ranker(comparison)
+
+        self.assertEqual(result["status"], "robust")
+        self.assertEqual(result["winner"], "verified-offer")
+        self.assertEqual(
+            result["evidence_backed_value"]["ranking"], ["verified-offer"]
+        )
+        self.assertEqual(result["unverified_value_contenders"][0]["rank"], 2)
+        warning_paths = {warning["path"] for warning in result["provenance_warnings"]}
+        self.assertIn(
+            "products.unverified.review_sources.ambiguous-reviews.url_or_source_ref",
+            warning_paths,
+        )
+        self.assertIn("offers.unverified-offer.url_or_source_ref", warning_paths)
 
     def test_missing_identity_and_provenance_are_explicitly_incomplete(self) -> None:
         comparison = {

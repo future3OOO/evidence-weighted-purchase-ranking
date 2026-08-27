@@ -23,6 +23,7 @@
           "url": "https://example.nz/products/ex-100",
           "corpus_id": "example-native-ex-100",
           "identity_match": "exact",
+          "evidence_type": "consumer_reviews",
           "observed_at": "2026-08-27T12:00:00+12:00",
           "rating": {
             "mean": 4.7,

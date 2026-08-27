@@ -1,4 +1,0 @@
-interface:
-  display_name: "Evidence-Weighted Purchase Ranking"
-  short_description: "Rank NZ retail and marketplace offers by evidence and landed value"
-  default_prompt: "Use $evidence-weighted-purchase-ranking to research comparable products and offers, normalize exact-product review evidence and landed NZD costs, run the deterministic scorer, and return one ranked winner plus the best NZ/AU alternative and decisive uncertainty."
