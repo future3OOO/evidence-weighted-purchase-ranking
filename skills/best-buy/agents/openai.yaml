@@ -1,0 +1,4 @@
+interface:
+  display_name: "Best Buy"
+  short_description: "Separate best price from evidence-backed value for NZ purchases"
+  default_prompt: "Use $best-buy to research comparable products and offers, normalize exact-product evidence and landed NZD costs, run the deterministic scorer, and report separate best-price and evidence-backed best-value results with explicit evidence labels and decisive uncertainty."

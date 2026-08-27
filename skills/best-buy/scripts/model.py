@@ -362,12 +362,17 @@ def score_product(product_value: object, policy: dict[str, object]) -> dict[str,
     observed_mean = observed_successes / reviewed_count if reviewed_count else None
     product_factor = min(observed_mean, quality_lower) if observed_mean is not None else quality_lower
     low_star_share = None
-    if unique_corpora and all(
-        corpus.low_count is not None for corpus in unique_corpora.values()
+    consumer_corpora = [
+        corpus
+        for corpus in unique_corpora.values()
+        if corpus.evidence_type == "consumer_reviews"
+    ]
+    if consumer_corpora and all(
+        corpus.low_count is not None for corpus in consumer_corpora
     ):
         low_star_share = sum(
-            float(corpus.low_count) for corpus in unique_corpora.values()
-        ) / reviewed_count
+            float(corpus.low_count) for corpus in consumer_corpora
+        ) / sum(corpus.count for corpus in consumer_corpora)
     used_source_ids = sorted(corpus.source_id for corpus in unique_corpora.values())
     used_set = set(used_source_ids)
     deduplicated_set = set(deduplicated_source_ids)

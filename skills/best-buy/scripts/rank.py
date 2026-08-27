@@ -115,7 +115,7 @@ def rank_comparison(payload: object, policy: dict[str, object]) -> dict[str, obj
     )
     raw_leader = raw_ranking[0] if raw_ranking else None
     raw_contenders = raw_landed_contenders(raw_leader, raw_ranking, offers)
-    raw_status = "incomplete" if raw_contenders else "robust"
+    raw_status = "incomplete" if raw_leader is None or raw_contenders else "robust"
 
     leader = ranking[0] if ranking else None
     set_unknown_cost_break_evens(leader, offers)
@@ -138,10 +138,20 @@ def rank_comparison(payload: object, policy: dict[str, object]) -> dict[str, obj
         provenance_warnings.append(provenance_warning(
             "comparison.observed_at", "comparison observation time is recommended", "warning"
         ))
+    value_provenance_warnings = [
+        warning
+        for item in [
+            *[product for product in products if product["value_eligible"]],
+            *ranking,
+        ]
+        for warning in require_sequence(
+            item.get("provenance_warnings"), "provenance_warnings"
+        )
+    ]
     if any(
         require_mapping(warning, "provenance warning").get("severity")
         == "incomplete"
-        for warning in provenance_warnings
+        for warning in value_provenance_warnings
     ):
         status = "incomplete"
 
@@ -260,7 +270,7 @@ def ranking_status(
         return "incomplete"
     if winner["decision_cost"] is None:
         return "incomplete"
-    provisional = False
+    provisional = bool(winner["unknown_cost_components"])
     for rival in offers:
         if rival is winner:
             continue
@@ -390,6 +400,8 @@ def render_markdown(result: dict[str, object]) -> str:
             if price_winner is not None
             else "Best-price winner: unresolved; leader "
             f"`{best_price.get('leader')}`"
+            if best_price.get("leader") is not None
+            else "Best price: incomplete - no qualifying offer"
         ),
         f"Best-price status: `{best_price.get('status')}`",
         f"Model: `{result.get('model_version')}`",

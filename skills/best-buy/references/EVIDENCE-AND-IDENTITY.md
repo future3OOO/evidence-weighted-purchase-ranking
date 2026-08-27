@@ -36,7 +36,7 @@ Listing-family reviews may support a selected variant only when all reviewed var
 - Average + count supplies a bounded rating mean and support count.
 - Rating with count unavailable remains visible, contributes provisional `n=1`, and sets `count_uncertain`.
 - Written comments affect hard-fit or separately reported recurring risks only when the evidence supports that finding. Partial comments never receive free-form sentiment points.
-- No reviews use the versioned prior interval; the product remains eligible rather than becoming zero-quality or perfect.
+- No reviews use the versioned prior interval for uncertainty, but the product is `unrated` and ineligible for evidence-backed value.
 
 The scorer labels product evidence independently from its estimated ProductFactor:
 

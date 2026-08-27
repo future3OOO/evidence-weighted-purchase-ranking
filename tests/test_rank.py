@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 REPO = Path(__file__).resolve().parents[1]
-RANKER = REPO / "skills" / "evidence-weighted-purchase-ranking" / "scripts" / "rank.py"
+RANKER = REPO / "skills" / "best-buy" / "scripts" / "rank.py"
 
 
 class RankingCliTests(unittest.TestCase):
@@ -111,6 +111,15 @@ class RankingCliTests(unittest.TestCase):
             result["evidence_backed_value"]["winner"], "reviewed-offer"
         )
         self.assertEqual(result["evidence_backed_value"]["status"], "robust")
+        self.assertEqual(
+            result["evidence_backed_value"]["ranking"], ["reviewed-offer"]
+        )
+        self.assertEqual(
+            [offer["offer_id"] for offer in result["ranking"]], ["reviewed-offer"]
+        )
+        self.assertEqual(
+            result["best_price"]["ranking"], ["cheap-offer", "reviewed-offer"]
+        )
         statuses = {
             product["product_id"]: product["evidence_status"]
             for product in result["products"]
@@ -592,6 +601,10 @@ class RankingCliTests(unittest.TestCase):
         self.assertEqual(result["raw_landed_status"], "incomplete")
         self.assertEqual(result["raw_landed_leader"], "known-delivered")
         self.assertEqual(result["raw_landed_contenders"], ["unknown-freight"])
+        self.assertEqual(result["best_price"]["status"], "incomplete")
+        self.assertIsNone(result["best_price"]["winner"])
+        self.assertEqual(result["best_price"]["leader"], "known-delivered")
+        self.assertEqual(result["best_price"]["contenders"], ["unknown-freight"])
         self.assertIsNone(offers["unknown-freight"]["landed_cost_high_nzd"])
         self.assertAlmostEqual(
             offers["unknown-freight"]["unknown_charge_break_even_nzd"], 10.0
@@ -617,6 +630,9 @@ class RankingCliTests(unittest.TestCase):
 
         result = self.run_ranker(comparison)
         scored = result["offers"][0]
+        self.assertEqual(result["status"], "provisional")
+        self.assertIsNone(result["winner"])
+        self.assertEqual(result["leader"], "bounded-shipping")
         self.assertEqual(scored["landed_cost_low_nzd"], 15.0)
         self.assertEqual(scored["landed_cost_high_nzd"], 25.0)
         self.assertNotIn("landed_cost_nzd", scored)
@@ -781,6 +797,9 @@ class RankingCliTests(unittest.TestCase):
         result = json.loads(completed.stdout)
         self.assertEqual(result["products"][0]["evidence_status"], "limited_evidence")
         self.assertEqual(result["evidence_backed_value"]["status"], "incomplete")
+        self.assertIsNone(result["evidence_backed_value"]["winner"])
+        self.assertIsNone(result["evidence_backed_value"]["leader"])
+        self.assertEqual(result["evidence_backed_value"]["ranking"], [])
 
     def test_all_unbounded_offers_have_unknown_break_evens(self) -> None:
         comparison = {
@@ -914,6 +933,47 @@ class RankingCliTests(unittest.TestCase):
         self.assertAlmostEqual(product["low_star_share"], 2 / 15)
         self.assertEqual(product["deduplicated_source_ids"], ["retailer-b-syndicated-copy"])
 
+    def test_expert_test_does_not_erase_consumer_low_star_share(self) -> None:
+        product = self.rated_product("mixed-evidence", 4.5, 10)
+        product["review_sources"] = [
+            {
+                "id": "consumer-histogram",
+                "corpus_id": "consumer-corpus",
+                "identity_match": "exact",
+                "evidence_type": "consumer_reviews",
+                "url": "https://example.nz/mixed-evidence",
+                "observed_at": "2026-08-27T12:00:00+12:00",
+                "rating": {
+                    "scale_min": 1,
+                    "scale_max": 5,
+                    "histogram": {"1": 1, "2": 1, "3": 1, "4": 2, "5": 5},
+                },
+            },
+            {
+                "id": "independent-expert",
+                "corpus_id": "expert-corpus",
+                "identity_match": "exact",
+                "evidence_type": "expert_test",
+                "independent": True,
+                "url": "https://expert.example/mixed-evidence",
+                "observed_at": "2026-08-27T12:00:00+12:00",
+                "rating": {"mean": 4.5, "scale_min": 1, "scale_max": 5},
+            },
+        ]
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+            },
+            "products": [product],
+            "offers": [self.offer("mixed-offer", "mixed-evidence")],
+        }
+
+        result = self.run_ranker(comparison)
+
+        self.assertAlmostEqual(result["products"][0]["low_star_share"], 0.2)
+
     def test_hard_fit_failure_is_excluded_before_ranking(self) -> None:
         comparison = {
             "comparison": {
@@ -947,6 +1007,40 @@ class RankingCliTests(unittest.TestCase):
             result["excluded"],
             [{"offer_id": "wrong-voltage", "reason": "Wrong voltage for New Zealand"}],
         )
+
+    def test_all_excluded_offers_leave_best_price_incomplete(self) -> None:
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+            },
+            "products": [self.rated_product("unsafe-product", 4.8, 10)],
+            "offers": [
+                {
+                    **self.offer("unsafe-offer", "unsafe-product", price=1),
+                    "hard_fit": False,
+                    "hard_fit_reason": "Unsafe for the required use",
+                }
+            ],
+        }
+
+        result = self.run_ranker(comparison)
+
+        self.assertEqual(result["best_price"]["status"], "incomplete")
+        self.assertIsNone(result["best_price"]["winner"])
+        self.assertIsNone(result["best_price"]["leader"])
+        self.assertEqual(result["best_price"]["ranking"], [])
+        completed = subprocess.run(
+            [sys.executable, str(RANKER), "--input", "-", "--format", "markdown"],
+            input=json.dumps(comparison),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("Best price: incomplete - no qualifying offer", completed.stdout)
+        self.assertNotIn("`None`", completed.stdout)
 
     def test_cleat_evidence_and_purchase_ranks_are_separate(self) -> None:
         comparison = {
@@ -1066,9 +1160,12 @@ class RankingCliTests(unittest.TestCase):
         result = self.run_ranker(comparison)
         self.assertEqual(result["status"], "provisional")
         self.assertIsNone(result["evidence_backed_value"]["winner"])
-        self.assertIn(
-            result["evidence_backed_value"]["leader"],
-            {"model-a-offer", "model-b-offer"},
+        self.assertEqual(
+            result["evidence_backed_value"]["leader"], "model-b-offer"
+        )
+        self.assertEqual(
+            result["evidence_backed_value"]["ranking"],
+            ["model-b-offer", "model-a-offer"],
         )
 
     def test_non_exact_product_identity_cannot_produce_a_robust_value_winner(self) -> None:
@@ -1158,6 +1255,58 @@ class RankingCliTests(unittest.TestCase):
         }
         self.assertEqual(reranked_scores["offer-a"], baseline_scores["offer-a"])
         self.assertEqual(reranked_scores["offer-b"], baseline_scores["offer-b"])
+
+    def test_ineligible_provenance_warnings_do_not_erase_value_winner(self) -> None:
+        unverified = {
+            "id": "unverified",
+            "name": "Unverified product",
+            "identity": {
+                "confidence": "exact",
+                "brand": "Example",
+                "mpn": "UNVERIFIED",
+                "variant": "standard",
+            },
+            "hard_fit": True,
+            "review_sources": [
+                {
+                    "id": "ambiguous-reviews",
+                    "corpus_id": "ambiguous-corpus",
+                    "identity_match": "ambiguous",
+                    "rating": {
+                        "mean": 5.0,
+                        "scale_min": 1,
+                        "scale_max": 5,
+                        "count": 100,
+                    },
+                }
+            ],
+        }
+        comparison = {
+            "comparison": {
+                "destination": "NZ",
+                "needed_quantity": 1,
+                "quantity_unit": "item",
+            },
+            "products": [self.rated_product("verified", 4.8, 10), unverified],
+            "offers": [
+                self.offer("verified-offer", "verified", price=10),
+                {**self.offer("unverified-offer", "unverified", price=100), "url": None},
+            ],
+        }
+
+        result = self.run_ranker(comparison)
+
+        self.assertEqual(result["status"], "robust")
+        self.assertEqual(result["winner"], "verified-offer")
+        self.assertEqual(
+            result["evidence_backed_value"]["ranking"], ["verified-offer"]
+        )
+        warning_paths = {warning["path"] for warning in result["provenance_warnings"]}
+        self.assertIn(
+            "products.unverified.review_sources.ambiguous-reviews.url_or_source_ref",
+            warning_paths,
+        )
+        self.assertIn("offers.unverified-offer.url_or_source_ref", warning_paths)
 
     def test_missing_identity_and_provenance_are_explicitly_incomplete(self) -> None:
         comparison = {

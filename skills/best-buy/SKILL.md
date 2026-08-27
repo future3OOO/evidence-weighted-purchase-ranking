@@ -1,9 +1,9 @@
 ---
-name: evidence-weighted-purchase-ranking
+name: best-buy
 description: Ranks comparable products and purchase offers across online retailers and marketplaces using landed cost, exact-product review evidence, applicable seller evidence, and NZ-first regional preference. Use when a New Zealand shopper asks for the best value or best buy, requests a cross-site comparison, or supplies listings or screenshots to rank.
 ---
 
-# Evidence-Weighted Purchase Ranking
+# Best Buy
 
 Produce two computed retail rankings: **best price** and **evidence-backed best value**. Research first, normalize evidence, run the bundled scorer, and never turn assumed quality into observed evidence.
 
@@ -36,7 +36,7 @@ python scripts/rank.py --template
 python scripts/rank.py --input comparison.json --format markdown
 ```
 
-Use `--format json` for machine-readable intermediates and `--policy custom-policy.json` only when the user explicitly changes the defaults. The executable schema is authoritative; see [RANKING-MODEL.md](references/RANKING-MODEL.md) for interpretation and [NZ-AU-PURCHASE-POLICY.md](references/NZ-AU-PURCHASE-POLICY.md) for regional policy.
+Use `--format json` for machine-readable intermediates and `--policy custom-policy.json` only when the user explicitly changes the defaults. A custom policy must define every Model 3.0 evidence-policy key; legacy comparison inputs remain supported, but older custom policy files do not. The executable schema is authoritative; see [RANKING-MODEL.md](references/RANKING-MODEL.md) for interpretation and [NZ-AU-PURCHASE-POLICY.md](references/NZ-AU-PURCHASE-POLICY.md) for regional policy.
 
 7. If a decisive cost or identity fact is missing, research it before asking. When it remains unavailable, preserve the script's interval/status and report its break-even rather than guessing.
 

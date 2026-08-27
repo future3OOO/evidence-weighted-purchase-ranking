@@ -1,4 +1,4 @@
-# Evidence-Weighted Purchase Ranking
+# Best Buy
 
 A Codex skill for deterministic best-buy comparisons across ordinary retailers and marketplaces, designed for a New Zealand shopper. It separates exact-product evidence from retailer offers, handles missing marketplace-only fields without penalising direct retailers, pools deduplicated cross-site reviews only after an identity gate, calculates landed cost-to-need, and applies an explicit NZ/AU preference that overseas bargains can still overcome.
 
@@ -7,7 +7,7 @@ A Codex skill for deterministic best-buy comparisons across ordinary retailers a
 At a Codex prompt, run:
 
 ```text
-$skill-installer install https://github.com/future3OOO/evidence-weighted-purchase-ranking/tree/main/skills/evidence-weighted-purchase-ranking
+$skill-installer install https://github.com/future3OOO/evidence-weighted-purchase-ranking/tree/main/skills/best-buy
 ```
 
 Restart Codex if the skill is not discovered immediately.
@@ -15,7 +15,7 @@ Restart Codex if the skill is not discovered immediately.
 ## Invoke
 
 ```text
-$evidence-weighted-purchase-ranking
+$best-buy
 ```
 
 The skill also triggers for best-value, best-buy, cross-site, and ranked purchase comparisons involving ordinary NZ/AU retailers, Trade Me/eBay/AliExpress-style marketplaces, product reviews, seller evidence, screenshots, or landed pricing.
@@ -58,12 +58,12 @@ The scorer uses only the Python standard library. Its normalized JSON boundary i
 
 ## Files
 
-- [`SKILL.md`](skills/evidence-weighted-purchase-ranking/SKILL.md): concise runtime workflow and output contract.
-- [`RANKING-MODEL.md`](skills/evidence-weighted-purchase-ranking/references/RANKING-MODEL.md): formulas and interpretation.
-- [`EVIDENCE-AND-IDENTITY.md`](skills/evidence-weighted-purchase-ranking/references/EVIDENCE-AND-IDENTITY.md): exact-product matching and review-corpus deduplication.
-- [`RETAILER-FIELDS.md`](skills/evidence-weighted-purchase-ranking/references/RETAILER-FIELDS.md): adaptive extraction for direct retailers and marketplaces.
-- [`NZ-AU-PURCHASE-POLICY.md`](skills/evidence-weighted-purchase-ranking/references/NZ-AU-PURCHASE-POLICY.md): regional sourcing and landed-cost rules.
-- [`default-policy.json`](skills/evidence-weighted-purchase-ranking/scripts/default-policy.json): versioned executable defaults.
+- [`SKILL.md`](skills/best-buy/SKILL.md): concise runtime workflow and output contract.
+- [`RANKING-MODEL.md`](skills/best-buy/references/RANKING-MODEL.md): formulas and interpretation.
+- [`EVIDENCE-AND-IDENTITY.md`](skills/best-buy/references/EVIDENCE-AND-IDENTITY.md): exact-product matching and review-corpus deduplication.
+- [`RETAILER-FIELDS.md`](skills/best-buy/references/RETAILER-FIELDS.md): adaptive extraction for direct retailers and marketplaces.
+- [`NZ-AU-PURCHASE-POLICY.md`](skills/best-buy/references/NZ-AU-PURCHASE-POLICY.md): regional sourcing and landed-cost rules.
+- [`default-policy.json`](skills/best-buy/scripts/default-policy.json): versioned executable defaults.
 
 ## Verify
 

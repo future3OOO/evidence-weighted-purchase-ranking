@@ -101,6 +101,8 @@ A robust value winner requires all of the following:
 
 Overlapping intervals, an exact tie, or non-exact product identity produce a `provisional` **leader**, never a winner. Missing eligible products or decisive cost/provenance facts produce `incomplete`.
 
+A bounded but unresolved cost on the leading offer also remains `provisional`, even when its conservative interval is separated from every rival.
+
 Tie order is: lower DecisionCost, lower exact landed cost, higher ProductFactor, NZ before AU before international, more independent product reviews, more seller feedback, sold/transactions, then stable offer ID. Use full precision for ordering.
 
 `best_price` is the primary price result. The legacy `raw_landed_*` keys mirror it for compatibility. `evidence_backed_value.winner` is non-null only for `robust`; `leader` names the computed ordering head for provisional or cost-incomplete eligible comparisons. When no product is eligible, both are null and the status is `incomplete`.
