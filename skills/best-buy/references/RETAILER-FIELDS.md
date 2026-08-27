@@ -31,7 +31,7 @@ Prefer, in order:
 2. average plus supporting review count;
 3. average with count unavailable (the scorer uses provisional `n=1` and marks uncertainty);
 4. complete individual-review population;
-5. partial/sorted comments for qualitative defect, fit, durability, or safety findings only;
+5. partial/sorted comments for qualitative defect, fit, or durability findings only;
 6. no native reviews, followed by an exact-product cross-site search.
 
 Record whether reviews are verified-purchase, staff, incentivized/promotional, native, manufacturer-syndicated, or unknown. Record the review provider and corpus ID when visible. Do not assume every solicited or moderated review is verified.

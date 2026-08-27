@@ -12,7 +12,7 @@ Search in this order:
 
 Always retain a credible NZ/AU option when one exists. `.co.nz`, an NZD display, or `ships from NZ` does not prove NZ business jurisdiction. Record merchant jurisdiction/type separately from fulfilment origin. For Trade Me-style offers, distinguish in-trade businesses from private sellers.
 
-An AU offer is invalid if it is AU pickup-only or will not deliver the selected product to the NZ destination. Check plug/voltage/regulatory compatibility, warranty geography, and return freight.
+An AU offer is invalid if it is AU pickup-only or will not deliver the selected product to the NZ destination. Check plug/voltage compatibility, warranty geography, and return freight.
 
 ## Landed NZD cost
 
