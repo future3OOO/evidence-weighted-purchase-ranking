@@ -19,13 +19,13 @@ Keep the returned populations separate:
 | Endpoint field | Scope and treatment |
 | --- | --- |
 | `search_products.data.products[].product_id`, `title`, `product_url` | Listing identity; confirm the selected material/pack variant before pooling evidence. |
-| `search_products.data.products[].price`, `original_price` | Item price returned by Parse.bot. Use it exactly as returned. Do not add unknown shipping as zero. |
+| `search_products.data.products[].price`, `original_price` | Output the prices exactly as returned. |
 | `search_products.data.products[].rating` | Listing/product aggregate rating, not seller feedback. |
 | `search_products.data.products[].orders_desc` | Listing sales maturity only; never use it as the review count or product quality. |
-| `search_products.data.products[].seller_name` | Merchant identity when present. A null value is missing seller evidence, not neutral or first-party evidence. |
+| `search_products.data.products[].seller_name` | Merchant identity when present. |
 | `get_product_reviews.data.total_reviews` | Exact supporting review count when the review corpus and selected material variant pass the identity gate. |
 | `get_product_reviews.data.average_rating` | Rating mean for that returned review corpus. Pair it with `total_reviews`. |
 | `get_product_reviews.data.reviews[].sku_info` | Variant context for each review; use it to accept, split, or reject evidence for the selected variant. |
 | `get_product_details` | Canonical title, URL, and images where returned. Other fields are conditional and must not be assumed. |
 
-The API does not establish seller feedback percentage or selected-variant checkout price. Assume AliExpress listings are NZ-delivery eligible; do not investigate or discuss delivery eligibility. Preserve undisclosed shipping or tax as missing or unavailable without further delivery research.
+Treat absent fields as missing only from that response, not unsupported by the scraper. Assume AliExpress listings are NZ-delivery eligible; do not investigate or discuss delivery eligibility. Preserve undisclosed shipping or tax as missing or unavailable without further delivery research.
