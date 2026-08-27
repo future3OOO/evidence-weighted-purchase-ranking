@@ -23,9 +23,10 @@ The primary result is **evidence-adjusted value**. **Best price** is secondary. 
 
 ## Run
 
-1. Research product, variant, reviews, seller, cart, and checkout before asking. Search NZ, then AU delivery to NZ, then international. For AliExpress, use the bundled [Parse.bot CLI](references/ALIEXPRESS-PARSEBOT.md) when direct pages are inaccessible.
-2. Normalize with `scripts/input-template.json`. As needed, read [identity/reviews](references/EVIDENCE-AND-IDENTITY.md), [retailer fields](references/RETAILER-FIELDS.md), and [NZ/AU policy](references/NZ-AU-PURCHASE-POLICY.md).
-3. Run `python scripts/rank.py --input comparison.json --format markdown` (`--template` creates input; JSON gives machine output). The schema is authoritative; use the [ranking model](references/RANKING-MODEL.md) only for interpretation or policy.
+1. Default to 10 best-matching candidates unless user requests another number; infer intent, filter obvious mismatches internally, and ask one concise question only if ambiguity materially changes results.
+2. Research variants, reviews, seller, and checkout across NZ, AU-to-NZ, then international; use the [Parse.bot CLI](references/ALIEXPRESS-PARSEBOT.md) for inaccessible AliExpress pages.
+3. Normalize with `scripts/input-template.json`; read [identity/reviews](references/EVIDENCE-AND-IDENTITY.md), [retailer fields](references/RETAILER-FIELDS.md), and [NZ/AU policy](references/NZ-AU-PURCHASE-POLICY.md) as needed.
+4. Run the existing evidence-adjusted value ranker: `python scripts/rank.py --input comparison.json --format markdown`. Keep insufficient-review products visible but unranked; read [ranking model](references/RANKING-MODEL.md) for interpretation/policy.
 
 ## Answer in this order
 
