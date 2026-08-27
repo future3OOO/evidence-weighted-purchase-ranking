@@ -13,13 +13,24 @@ class SkillStructureTests(unittest.TestCase):
         self.assertTrue(SKILL_DIR.is_dir(), "canonical skill directory must be skills/best-buy")
         skill = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
         self.assertLessEqual(len(skill.splitlines()), 100)
+        self.assertLessEqual(len(skill.split()), 400)
         self.assertRegex(skill, r"(?m)^name: best-buy$")
         self.assertRegex(skill, r"(?m)^# Best Buy$")
         self.assertRegex(skill, r"(?m)^description: .+retailers.+marketplaces.+$")
         linked_paths = re.findall(r"\]\(([^)]+)\)", skill)
-        self.assertGreaterEqual(len(linked_paths), 5)
+        required_links = {
+            "references/EVIDENCE-AND-IDENTITY.md",
+            "references/RETAILER-FIELDS.md",
+            "references/RANKING-MODEL.md",
+            "references/NZ-AU-PURCHASE-POLICY.md",
+            "references/CALIBRATION.md",
+        }
+        self.assertLessEqual(required_links, set(linked_paths))
         for linked_path in linked_paths:
             self.assertTrue((SKILL_DIR / linked_path).is_file(), linked_path)
+        self.assertIn("one known-count exact consumer review", skill)
+        self.assertIn("Products with no usable exact review evidence are unranked", skill)
+        self.assertIn("A response fails this skill if its first ranking is ordered by price", skill)
 
     def test_skill_identity_is_consistently_best_buy(self) -> None:
         self.assertFalse(OLD_SKILL_DIR.exists())

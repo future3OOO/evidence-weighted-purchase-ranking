@@ -40,7 +40,7 @@ Listing-family reviews may support a selected variant only when all reviewed var
 
 The scorer labels product evidence independently from its estimated ProductFactor:
 
-- `evidence_backed`: at least the configured known-count exact consumer-review minimum, or a configured exact independent expert test;
+- `evidence_backed`: at least one known-count exact consumer review, or a configured exact independent expert test;
 - `limited_evidence`: usable exact evidence below the value threshold, including an exact rating whose supporting count is unavailable or an otherwise usable expert test that policy does not admit;
 - `unrated`: no usable exact evidence;
 - `ambiguous_evidence`: visible evidence cannot be assigned to the selected product or material variant.
