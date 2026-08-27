@@ -1331,6 +1331,7 @@ class RankingCliTests(unittest.TestCase):
         self.assertEqual(
             result["evidence_backed_value"]["ranking"], ["verified-offer"]
         )
+        self.assertEqual(result["unverified_value_contenders"][0]["rank"], 2)
         warning_paths = {warning["path"] for warning in result["provenance_warnings"]}
         self.assertIn(
             "products.unverified.review_sources.ambiguous-reviews.url_or_source_ref",

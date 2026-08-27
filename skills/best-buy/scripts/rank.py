@@ -183,7 +183,8 @@ def rank_comparison(payload: object, policy: dict[str, object]) -> dict[str, obj
         ],
         "unverified_value_contenders": [
             {"rank": index + 1, **offer}
-            for index, offer in enumerate(unverified_value_contenders)
+            for index, offer in enumerate(diagnostic_ranking)
+            if not offer["value_eligible"]
         ],
         "raw_landed_ranking": [offer["offer_id"] for offer in raw_ranking],
         "raw_landed_winner": (
