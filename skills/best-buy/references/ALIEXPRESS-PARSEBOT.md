@@ -19,7 +19,7 @@ Keep the returned populations separate:
 | Endpoint field | Scope and treatment |
 | --- | --- |
 | `search_products.data.products[].product_id`, `title`, `product_url` | Listing identity; confirm the selected material/pack variant before pooling evidence. |
-| `search_products.data.products[].price`, `original_price` | USD item price. Convert using a cited, timestamped USD/NZD rate. Do not add unknown shipping as zero. |
+| `search_products.data.products[].price`, `original_price` | Item price returned by Parse.bot. Use it exactly as returned. Do not add unknown shipping as zero. |
 | `search_products.data.products[].rating` | Listing/product aggregate rating, not seller feedback. |
 | `search_products.data.products[].orders_desc` | Listing sales maturity only; never use it as the review count or product quality. |
 | `search_products.data.products[].seller_name` | Merchant identity when present. A null value is missing seller evidence, not neutral or first-party evidence. |
